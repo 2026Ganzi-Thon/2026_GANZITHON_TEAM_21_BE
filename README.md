@@ -57,3 +57,13 @@ Docker Desktop 엔진에 접근할 수 있는 Windows PowerShell에서는 `power
 모든 경로는 `/api/v1` 아래이며 Bearer access token이 필요합니다. `GET /inbox?unreadOnly=true&date=YYYY-MM-DD&limit=20&cursor=...`는 조회만 수행합니다. `POST /receipts/{id}/open`은 `Idempotency-Key: <UUID>`와 `{}`를 보내 최초 열람을 확정하며, 같은 키 재시도는 첫 응답을 돌려줍니다. `GET /receipts/{id}/replay`는 열람 후 재진입에 사용합니다. 친구 수신 구슬은 반응과 조용히 듣기를 사용할 수 없습니다.
 
 `GET /records?side=OWN&from=YYYY-MM-DD&to=YYYY-MM-DD&limit=100&cursor=...` 또는 `date=YYYY-MM-DD`로 본인 기록을 페이지 끝까지 순회할 수 있습니다. 날짜는 KST 기준 양끝 포함이며 대표 색과 12주 기록장을 계산할 때 모든 페이지를 조회해야 합니다. `GET /records/{id}`는 상세, `DELETE /records/{id}`는 본인 OWN 기록 숨김입니다. `POST /dispatches/{dispatchId}/targets/{targetId}/cancel`은 멱등키와 `{}`를 보내며, 전송 후 5분 이내이고 해당 수신자가 미열람일 때만 성공합니다. 취소된 수신 사본은 수신함과 받은 기록에서 제외되지만 발신 기록에는 취소 상태가 남습니다.
+
+## 4단계: 익명 전송·반응·신고·차단
+
+`GET /me/settings`는 현재 익명·푸시·휴식 설정을 반환합니다. `PATCH /me/settings`에 `{"anonymousEnabled":true}`를 보내면 성인 확인 상태가 `VERIFIED_19_PLUS`인 계정만 익명 발신과 수신을 함께 켤 수 있습니다. 신규 계정은 `UNKNOWN`이므로 `403 AGE_REQUIRED`이며, 현재 연령을 승격하는 제품 API는 없습니다. `{"anonymousEnabled":false}`는 기존 수신 기록을 지우지 않습니다.
+
+익명 전송은 초안에 `POST /orbs/{orbId}/dispatches`, 본문 `{"route":"ANONYMOUS"}`, 헤더 `Idempotency-Key: <UUID>`를 사용합니다. 매칭은 KST 날짜별 발신 5회·수신 3건, 전송당 1~3명이며 대상의 식별 정보는 반환하지 않습니다. 후보가 없으면 `409 NO_MATCH`, 발신 한도에 도달하면 `429 ANON_SEND_LIMIT`와 다음 KST 자정 `retryAt`을 반환합니다. 취소·삭제·신고로 한도는 복원되지 않습니다.
+
+익명 최초 `POST /receipts/{id}/open`에는 `actions=["REACT","QUIET"]`와 10분짜리 `actionToken`이 포함됩니다. `POST /receipts/{id}/reaction`은 `{"actionToken":"...","code":"HEART"}`와 멱등키를 보내며 사본당 한 번만 성공합니다. `POST /receipts/{id}/finish`는 같은 토큰으로 반응 기회를 닫고 204를 반환합니다. 재진입도 반응 기회를 닫습니다. `POST /receipts/{id}/reports`는 `{"reasonCode":"OTHER","detail":"..."}`와 멱등키를 사용하고, `PUT /receipts/{id}/anonymous-block`은 `{}`로 익명 발신자를 이후 양방향 매칭에서 제외합니다.
+
+로컬 H2를 포함한 기본 검증은 `./gradlew.bat test`입니다. Docker Desktop이 실행 중이면 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-stage4-postgres.ps1`로 임시 PostgreSQL에서 V1~V4, 실제 HTTP와 동시 요청을 검증합니다. 이 스크립트가 만드는 계정의 성인 상태는 임시 테스트 DB에서만 직접 부여하며 실제 연령 인증을 의미하지 않습니다. 익명 최초 열람의 멱등 응답에는 비밀 토큰이 들어 있으므로 운영·지속 실행 환경에서는 32바이트 난수를 Base64로 인코딩한 `EMORI_IDEMPOTENCY_SECRET`을 환경변수로 고정해야 합니다. 값이 없으면 개발용 프로세스 키가 생성되어 재시작 전 멱등 응답 복호화만 가능합니다. 비밀값 자체를 저장소에 넣지 마세요.

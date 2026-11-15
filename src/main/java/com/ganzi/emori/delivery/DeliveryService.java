@@ -18,6 +18,8 @@ import java.time.LocalDate;
 import java.time.OffsetDateTime;
 import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.security.SecureRandom;
+import java.util.Base64;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -26,6 +28,7 @@ import java.util.UUID;
 @Service
 public class DeliveryService {
     private static final ZoneId KST = ZoneId.of("Asia/Seoul");
+    private static final SecureRandom RANDOM = new SecureRandom();
     private final JdbcTemplate jdbc;
     private final DbSupport db;
     private final Idempotency idempotency;
@@ -80,24 +83,44 @@ public class DeliveryService {
         return idempotency.execute(actor, "POST", path, key, "{}", 200, () -> {
             Row row = owned(actor, receiptId);
             if (row.openedAt() == null) {
-                jdbc.update("UPDATE receipt SET opened_at=? WHERE id=? AND opened_at IS NULL AND cancelled_at IS NULL",
-                        DbSupport.now(), receiptId);
+                OffsetDateTime now=DbSupport.now();
+                String token=null;
+                if("ANONYMOUS".equals(row.route())) {
+                    byte[] bytes=new byte[32]; RANDOM.nextBytes(bytes);
+                    token=Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
+                    jdbc.update("""
+                            UPDATE receipt SET opened_at=?,action_token_hash=?,action_expires_at=?
+                            WHERE id=? AND opened_at IS NULL AND cancelled_at IS NULL
+                            """,now,DbSupport.hash(token),now.plusMinutes(10),receiptId);
+                } else {
+                    jdbc.update("UPDATE receipt SET opened_at=? WHERE id=? AND opened_at IS NULL AND cancelled_at IS NULL",
+                            now,receiptId);
+                }
                 return new SingleView(view(owned(actor, receiptId)), orbs.snapshot(row.orbId()),
-                        "FIRST", List.of(), null);
+                        "FIRST",token==null?List.of():List.of("REACT","QUIET"),token);
             }
+            if("ANONYMOUS".equals(row.route())) closeAction(receiptId);
             return new SingleView(view(row), orbs.snapshot(row.orbId()), "REPLAY", List.of(), null);
         });
     }
 
+    @Transactional
     public SingleView replay(UUID actor, String idText) {
-        Row row = owned(actor, DbSupport.pathId(idText));
+        UUID id=DbSupport.pathId(idText);
+        Row row=owned(actor,id);
         if (row.openedAt() == null) throw new ApiException(HttpStatus.CONFLICT, "NOT_OPENED", "아직 열람하지 않은 구슬입니다.");
+        if("ANONYMOUS".equals(row.route())) {
+            jdbc.query("SELECT id FROM receipt WHERE id=? FOR UPDATE",(rs,n)->rs.getObject(1),id);
+            closeAction(id);
+        }
         return new SingleView(view(row), orbs.snapshot(row.orbId()), "REPLAY", List.of(), null);
     }
 
-    public void rejectFriendAction(UUID actor, String idText) {
-        owned(actor, DbSupport.pathId(idText));
-        throw new ApiException(HttpStatus.FORBIDDEN, "ACTION_NOT_ALLOWED", "이 구슬에는 반응 기능이 없습니다.");
+    private void closeAction(UUID id) {
+        jdbc.update("""
+                UPDATE receipt SET action_closed_at=? WHERE id=? AND action_token_hash IS NOT NULL
+                AND action_closed_at IS NULL
+                """,DbSupport.now(),id);
     }
 
     @Transactional

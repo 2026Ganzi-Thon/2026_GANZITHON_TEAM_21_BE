@@ -24,6 +24,8 @@ public class ApiErrors {
 
     @ExceptionHandler(ApiException.class)
     public ResponseEntity<?> known(ApiException e) {
+        if (e.retryAt() != null) return ResponseEntity.status(e.status()).body(
+                Map.of("error", Map.of("code", e.code(), "message", e.getMessage(), "retryAt", e.retryAt())));
         return error(e.status(), e.code(), e.getMessage());
     }
 

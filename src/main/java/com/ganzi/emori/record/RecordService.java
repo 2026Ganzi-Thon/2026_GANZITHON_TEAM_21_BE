@@ -72,8 +72,15 @@ public class RecordService {
 
     public RecordDetail detail(UUID actor, String idText) {
         Row row = owned(actor, DbSupport.pathId(idText));
+        List<ReactionCount> reactions=row.side().equals("OWN") && row.route().equals("ANONYMOUS")
+                ? jdbc.query("""
+                    SELECT rr.code,COUNT(*) AS total FROM receipt_reaction rr
+                    JOIN receipt r ON r.id=rr.receipt_id
+                    WHERE r.dispatch_id=? GROUP BY rr.code ORDER BY rr.code
+                    """,(rs,n)->new ReactionCount(rs.getString(1),rs.getInt(2)),row.dispatchId())
+                : List.of();
         return new RecordDetail(view(row), row.side().equals("OWN")
-                ? dispatches.get(actor, row.dispatchId().toString()) : null, List.of());
+                ? dispatches.get(actor, row.dispatchId().toString()) : null, reactions);
     }
 
     @Transactional
