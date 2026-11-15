@@ -89,11 +89,20 @@ public class OrbService {
         if (rows.isEmpty() || !rows.getFirst().author().equals(actor)) {
             throw new ApiException(HttpStatus.NOT_FOUND, "NOT_FOUND", "구슬을 찾을 수 없습니다.");
         }
+        return new OrbDetail(snapshot(id), null);
+    }
+
+    // Internal snapshot loader. Callers must establish their own receipt or record ownership first.
+    public Orb snapshot(UUID id) {
+        List<OrbRow> rows = jdbc.query("SELECT id,author_id,kind,created_at FROM orb WHERE id=?",
+                (rs, n) -> new OrbRow(rs.getObject(1, UUID.class), rs.getObject(2, UUID.class), rs.getString(3),
+                        rs.getObject(4, OffsetDateTime.class)), id);
+        if (rows.isEmpty()) throw new ApiException(HttpStatus.NOT_FOUND, "NOT_FOUND", "구슬을 찾을 수 없습니다.");
         OrbRow row = rows.getFirst();
         List<Emotion> selected = jdbc.query("""
                 SELECT emotion_id,color,area,word FROM orb_emotion WHERE orb_id=? ORDER BY position
                 """, (rs, n) -> new Emotion(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4)), id);
-        return new OrbDetail(new Orb(id.toString(), row.kind(), selected, null, row.createdAt().toInstant().toString()), null);
+        return new Orb(id.toString(), row.kind(), selected, null, row.createdAt().toInstant().toString());
     }
 
     private record EmotionSnapshot(int version, String id, String color, String area, String word, boolean care) {}

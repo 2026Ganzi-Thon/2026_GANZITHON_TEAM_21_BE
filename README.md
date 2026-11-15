@@ -46,6 +46,14 @@ H2는 빠른 로컬 확인용입니다. PostgreSQL의 스키마 제약과 동시
 
 초안을 확정할 때 `Idempotency-Key: <UUID>` 헤더와 `{"route":"SELF"}` 또는 `{"route":"FRIEND","friendId":"<user UUID>"}` 본문을 보냅니다. `POST /orbs`에도 같은 헤더가 필수입니다. 같은 키·본문의 성공 요청은 24시간 같은 결과를 반환합니다. 다른 키로 같은 구슬을 다시 확정하면 `409 ALREADY_DISPATCHED`입니다. 친구 삭제 후 새 전송은 `409 FRIENDSHIP_CHANGED`이고 이미 만들어진 기록과 수신 사본은 유지됩니다.
 
-Flyway `V2`는 H2와 PostgreSQL 공통 구조입니다. `postgres` 프로필에서만 적용하는 `V2_1`은 로그인 아이디 정규식 제약과 친구 요청·본인 기록의 부분 고유 인덱스를 추가합니다. H2에서는 로그인 아이디를 서비스 계층에서 검증하며, H2 테스트를 PostgreSQL 검증으로 간주하지 않습니다. 수신함·기록 조회·대상 취소는 3단계, 익명 전송은 4단계, ASMR 생성은 6단계 범위입니다.
+Flyway `V2`는 H2와 PostgreSQL 공통 구조입니다. `postgres` 프로필에서만 적용하는 `V2_1`은 로그인 아이디 정규식 제약과 친구 요청·본인 기록의 부분 고유 인덱스를 추가합니다. H2에서는 로그인 아이디를 서비스 계층에서 검증하며, H2 테스트를 PostgreSQL 검증으로 간주하지 않습니다. 수신함·기록 조회·대상 취소는 3단계에 구현했고, 익명 전송은 4단계, ASMR 생성은 6단계 범위입니다.
 
 Docker Desktop 엔진에 접근할 수 있는 Windows PowerShell에서는 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-stage2-postgres.ps1`로 임시 PostgreSQL 컨테이너를 띄우고 Flyway·인증·2단계 HTTP 흐름·친구 요청과 전송의 동시성 테스트를 검사할 수 있습니다. 스크립트는 고유한 컨테이너 이름과 임의의 DB 암호를 사용하고 종료 시 자신이 만든 컨테이너를 정리합니다. 실행 로그는 `build/`에 남습니다.
+
+## 3단계: 수신·기록·대상별 취소
+
+서버 실행 중 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/smoke-stage3.ps1`로 두 계정의 친구 전송, 수신함, 최초 열람, 재열람, 기록 삭제, 대상별 취소를 실제 HTTP로 확인합니다. PostgreSQL 전체 검증은 Docker 엔진이 실행 중일 때 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-stage3-postgres.ps1`을 실행합니다. 이 스크립트는 임시 PostgreSQL 컨테이너에 Flyway V1·V2·V2.1·V3을 적용하고 1~3단계 HTTP 및 경합 테스트를 수행한 뒤 컨테이너를 정리합니다.
+
+모든 경로는 `/api/v1` 아래이며 Bearer access token이 필요합니다. `GET /inbox?unreadOnly=true&date=YYYY-MM-DD&limit=20&cursor=...`는 조회만 수행합니다. `POST /receipts/{id}/open`은 `Idempotency-Key: <UUID>`와 `{}`를 보내 최초 열람을 확정하며, 같은 키 재시도는 첫 응답을 돌려줍니다. `GET /receipts/{id}/replay`는 열람 후 재진입에 사용합니다. 친구 수신 구슬은 반응과 조용히 듣기를 사용할 수 없습니다.
+
+`GET /records?side=OWN&from=YYYY-MM-DD&to=YYYY-MM-DD&limit=100&cursor=...` 또는 `date=YYYY-MM-DD`로 본인 기록을 페이지 끝까지 순회할 수 있습니다. 날짜는 KST 기준 양끝 포함이며 대표 색과 12주 기록장을 계산할 때 모든 페이지를 조회해야 합니다. `GET /records/{id}`는 상세, `DELETE /records/{id}`는 본인 OWN 기록 숨김입니다. `POST /dispatches/{dispatchId}/targets/{targetId}/cancel`은 멱등키와 `{}`를 보내며, 전송 후 5분 이내이고 해당 수신자가 미열람일 때만 성공합니다. 취소된 수신 사본은 수신함과 받은 기록에서 제외되지만 발신 기록에는 취소 상태가 남습니다.

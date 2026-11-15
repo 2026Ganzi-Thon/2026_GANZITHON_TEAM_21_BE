@@ -43,6 +43,11 @@ public class Idempotency {
 
     // Call only inside a transaction after locking the actor's app_user row.
     public String execute(UUID user, String method, String path, UUID key, String canonicalBody, Supplier<?> work) {
+        return execute(user, method, path, key, canonicalBody, 201, work);
+    }
+
+    public String execute(UUID user, String method, String path, UUID key, String canonicalBody,
+                          int httpStatus, Supplier<?> work) {
         String requestHash = DbSupport.hash(canonicalBody);
         List<Stored> found = jdbc.query("""
                 SELECT request_hash,response_json,expires_at FROM idempotency_request
@@ -65,8 +70,8 @@ public class Idempotency {
         OffsetDateTime done = DbSupport.now();
         jdbc.update("""
                 INSERT INTO idempotency_request(id,user_id,method,resource_path,request_key,request_hash,
-                    http_status,response_json,completed_at,expires_at) VALUES (?,?,?,?,?,?,201,?,?,?)
-                """, UUID.randomUUID(), user, method, path, key, requestHash, response, done, done.plusHours(24));
+                    http_status,response_json,completed_at,expires_at) VALUES (?,?,?,?,?,?,?,?,?,?)
+                """, UUID.randomUUID(), user, method, path, key, requestHash, httpStatus, response, done, done.plusHours(24));
         return response;
     }
 
