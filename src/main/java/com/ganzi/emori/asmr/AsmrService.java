@@ -132,19 +132,18 @@ public class AsmrService {
     }
     public byte[] audio(UUID actor,UUID trackId){
         List<AudioRow> rows=jdbc.query("""
-                SELECT g.orb_id,g.detached_at,t.storage_key,o.author_id FROM asmr_track t
+                SELECT g.orb_id,t.storage_key,o.author_id FROM asmr_track t
                 JOIN asmr_generation g ON g.id=t.generation_id JOIN orb o ON o.id=g.orb_id
                 WHERE t.id=? AND t.status='READY'
                 """,(rs,n)->new AudioRow(rs.getObject(1,UUID.class),
-                rs.getObject(2,OffsetDateTime.class),rs.getString(3),rs.getObject(4,UUID.class)),trackId);
+                rs.getString(2),rs.getObject(3,UUID.class)),trackId);
         if(rows.isEmpty()) throw missing();
         AudioRow row=rows.getFirst();
         Boolean received=jdbc.queryForObject("""
                 SELECT EXISTS(SELECT 1 FROM receipt r JOIN dispatch d ON d.id=r.dispatch_id
                 WHERE d.orb_id=? AND r.recipient_id=? AND r.cancelled_at IS NULL)
                 """,Boolean.class,row.orb(),actor);
-        if((!actor.equals(row.author()) && !Boolean.TRUE.equals(received)) ||
-                (row.detached()!=null && !Boolean.TRUE.equals(received))) throw missing();
+        if(!actor.equals(row.author()) && !Boolean.TRUE.equals(received)) throw missing();
         try{return storage.read(row.storageKey());}
         catch(IOException e){throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE,
                 "AUDIO_UNAVAILABLE","음원을 읽을 수 없습니다.");}
@@ -201,5 +200,5 @@ public class AsmrService {
     private static ApiException conflict(String code){return new ApiException(HttpStatus.CONFLICT,code,"ASMR 작업 상태를 확인해주세요.");}
     private record Gen(UUID id,UUID orb,String status,OffsetDateTime detached,OffsetDateTime created,OffsetDateTime updated){}
     private record Attempt(UUID id,int attempt){}
-    private record AudioRow(UUID orb,OffsetDateTime detached,String storageKey,UUID author){}
+    private record AudioRow(UUID orb,String storageKey,UUID author){}
 }

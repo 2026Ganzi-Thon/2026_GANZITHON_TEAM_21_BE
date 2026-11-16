@@ -17,6 +17,7 @@ $oldStage4Url = $env:EMORI_STAGE4_TEST_DB_URL
 $oldMidnightUrl = $env:EMORI_STAGE4_MIDNIGHT_DB_URL
 $oldStage5Url = $env:EMORI_STAGE5_TEST_DB_URL
 $oldStage6Url = $env:EMORI_STAGE6_TEST_DB_URL
+$oldStage7Url = $env:EMORI_STAGE7_TEST_DB_URL
 $oldFlywayLocations = $env:SPRING_FLYWAY_LOCATIONS
 $oldAuthTestUrl = $env:EMORI_AUTH_TEST_DB_URL
 $oldStage2TestUrl = $env:EMORI_STAGE2_TEST_DB_URL
@@ -25,6 +26,7 @@ $oldAsmrFixture = $env:EMORI_ASMR_TEST_GENERATOR
 $oldAsmrWorker = $env:EMORI_ASMR_WORKER_ENABLED
 $oldAsmrStorage = $env:EMORI_ASMR_STORAGE_ROOT
 $oldIdempotencySecret = $env:EMORI_IDEMPOTENCY_SECRET
+$oldHikariPoolSize = $env:SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE
 
 function Get-FreePort {
     $listener = [System.Net.Sockets.TcpListener]::new([System.Net.IPAddress]::Loopback, 0)
@@ -118,7 +120,10 @@ try {
         if ($LASTEXITCODE -ne 0) { throw 'Stage 5 PostgreSQL tests failed.' }
     }
     if ($IncludeStage6) {
+        # The full suite keeps several Spring contexts alive at once; bound each test pool.
+        $env:SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE = '3'
         $env:EMORI_STAGE6_TEST_DB_URL = $env:DB_URL
+        $env:EMORI_STAGE7_TEST_DB_URL = $env:DB_URL
         $env:SPRING_FLYWAY_LOCATIONS = 'classpath:db/migration,classpath:db/postgres'
         $env:EMORI_AUTH_TEST_DB_URL = $env:DB_URL
         $env:EMORI_STAGE2_TEST_DB_URL = $env:DB_URL
@@ -276,6 +281,7 @@ try {
     $env:EMORI_STAGE4_MIDNIGHT_DB_URL = $oldMidnightUrl
     $env:EMORI_STAGE5_TEST_DB_URL = $oldStage5Url
     $env:EMORI_STAGE6_TEST_DB_URL = $oldStage6Url
+    $env:EMORI_STAGE7_TEST_DB_URL = $oldStage7Url
     $env:SPRING_FLYWAY_LOCATIONS = $oldFlywayLocations
     $env:EMORI_AUTH_TEST_DB_URL = $oldAuthTestUrl
     $env:EMORI_STAGE2_TEST_DB_URL = $oldStage2TestUrl
@@ -284,5 +290,6 @@ try {
     $env:EMORI_ASMR_WORKER_ENABLED = $oldAsmrWorker
     $env:EMORI_ASMR_STORAGE_ROOT = $oldAsmrStorage
     $env:EMORI_IDEMPOTENCY_SECRET = $oldIdempotencySecret
+    $env:SPRING_DATASOURCE_HIKARI_MAXIMUM_POOL_SIZE = $oldHikariPoolSize
     Pop-Location
 }

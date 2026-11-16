@@ -1,7 +1,7 @@
 # EmOri API 명세서
 
 **계약 v0.3 · 2026-11-15 · 기본 경로 /api/v1**  
-정책 기준 · [EmOri_PRD.md](PRD.md). 실제 배포 주소·ASMR 공급자·연령 확인 공급자는 미정이다. 최신 기획과 사용자 결정을 반영한 목표 계약이며 기존 BE 구현 및 FE 가짜 서버의 동작과 차이가 있다.
+정책 기준 · [EmOri_PRD.md](PRD.md). 실제 배포 주소·ASMR 공급자·연령 확인 공급자는 미정이다. 현재 BE 구현과 대조했으며 FE `dev` 브랜치의 연동 차이는 [FE_INTEGRATION.md](FE_INTEGRATION.md)에 정리했다.
 
 ## 1. 공통 규칙
 

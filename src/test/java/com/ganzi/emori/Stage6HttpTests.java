@@ -110,6 +110,7 @@ class Stage6HttpTests {
         call("DELETE","/orbs/"+orb+"/playlist",owner,null,204,null);
         call("DELETE","/orbs/"+orb+"/playlist",owner,null,204,null);
         assertThat(call("GET","/orbs/"+orb,owner,null,200,null).at("/orb/playlist").isNull()).isTrue();
+        assertThat(audio(owner,"/asmr-tracks/"+generation.at("/tracks/0/id").asText()+"/audio",200)).hasSizeGreaterThan(44);
         call("POST","/orbs/"+orb+"/dispatches",owner,"{\"route\":\"SELF\"}",201,UUID.randomUUID().toString());
     }
     @Test void restartedWorkerIgnoresLateLeaseResult() throws Exception {
