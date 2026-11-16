@@ -19,7 +19,7 @@ import java.util.concurrent.Executors;
 
 import static org.assertj.core.api.Assertions.assertThat;
 
-@SpringBootTest(properties = "spring.datasource.url=jdbc:h2:mem:stage2_tests;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1")
+@SpringBootTest(properties = "spring.datasource.url=${EMORI_STAGE2_TEST_DB_URL:jdbc:h2:mem:stage2_tests;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1}")
 @AutoConfigureMockMvc
 class Stage2HttpTests {
     @Autowired MockMvc mvc;

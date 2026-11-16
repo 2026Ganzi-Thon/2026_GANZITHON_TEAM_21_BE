@@ -27,7 +27,7 @@ HTTPS JSON, camelCase, 인증은 `Authorization: Bearer <accessToken>`. 공개 A
 | UserSummary | `{id,nickname}`. 본인·친구 관계의 공개 요약 |
 | Me | `{id,loginId,nickname,friendCode,adultStatus}`. friendCode=loginId, adultStatus=UNKNOWN / VERIFIED_19_PLUS / INELIGIBLE |
 | Emotion | `{id,color,area,word}`. 선택된 단어 하나. 카탈로그 표 참조 |
-| Track | `{id,order,title,durationMs,playbackUrl}`. 완료 트랙만, order=1~3. URL 만료 시 상세를 다시 조회 |
+| Track | `{id,order,title,durationMs,playbackUrl}`. 완료 트랙만, order=1~3. 현재 playbackUrl은 인증이 필요한 안정된 서버 경로 |
 | Playlist | `{id,status,tracks:[Track]}`. 전송된 구슬에는 READY 플레이리스트만 포함 |
 | Orb | `{id,kind,emotions:[Emotion],playlist:Playlist\|null,createdAt}`. kind=SINGLE / MIXED. 감정·정렬 순서·매핑 버전은 생성 당시 스냅샷 보존 |
 | Dispatch | `{id,orbId,route,status,recipientCount,sentAt,cancelUntil,targets:[Target]}`. route=SELF / FRIEND / ANONYMOUS. status=SAVED / SENT / PARTIALLY_CANCELLED / CANCELLED |
@@ -102,6 +102,7 @@ HTTPS JSON, camelCase, 인증은 `Authorization: Bearer <accessToken>`. 공개 A
 | POST /orbs/{orbId}/asmr-generations ★ | `{description?:string}` | 202 Generation, Location은 /asmr-generations/{id}. 설명 최대 300자(작업 기본값). 미전송 작성자만 |
 | GET /asmr-generations/{id} | — | 200 Generation. 생성 요청 작성자만. 진행 중 Retry-After: 3 |
 | POST /asmr-generations/{id}/retry ★ | `{}` | 202 Generation. FAILED·PARTIAL_FAILED의 실패 트랙만 재시도. 성공 트랙 유지. 실행 중 409 GENERATION_IN_PROGRESS |
+| GET /asmr-tracks/{id}/audio | — | 200 audio/wav. 작성자 또는 취소되지 않은 해당 구슬 수신자만. 그 외 404. 인증 필요, `Cache-Control: private, no-store` |
 
 `Generation={id,orbId,status,trackCount:3,tracks:[GenerationTrack],createdAt,updatedAt}`. `GenerationTrack={id,order,status,title:string|null,durationMs:number|null,playbackUrl:string|null,errorCode:string|null}`. 완료 전 미정 필드는 null. 상태는 아래와 같다.
 
@@ -115,6 +116,8 @@ HTTPS JSON, camelCase, 인증은 `Authorization: Bearer <accessToken>`. 공개 A
 폴링은 약 3초 간격으로 진행하며 종료 상태에서 멈춘다. 같은 orb에는 하나의 생성 작업만 연결한다. 재생성은 새 초안, 실패 복구는 retry를 사용한다. 기존 생성이 있으면 409 GENERATION_EXISTS. 제공자 오류는 작업 errorCode=GENERATION_FAILED 또는 GENERATION_TIMEOUT으로 표현한다. 생성 요청 자체를 받지 못한 일시 장애는 503이다.
 
 전송 시 이미 생성 요청한 음악이 READY여야 한다. 실패 상태에서도 첨부를 DELETE하면 음악 없이 전송 가능하다. 첨부 해제 후 옛 생성 결과가 다시 붙지 않도록 연결 상태를 확인한다. 전송된 플레이리스트의 트랙 ID·순서를 고정하며 URL 재발급으로 콘텐츠를 바꾸지 않는다. 크레딧·충전·결제 API는 이번 목표 계약에 포함하지 않는다.
+
+**6단계 구현 상태:** 생성 요청·재시도는 DB 커밋 후 워커가 처리한다. 현재 운영 기본 설정에는 실제 생성 공급자가 연결되지 않아 POST 생성 요청은 503 `GENERATION_UNAVAILABLE`이다. `asmr-test` 프로필과 `EMORI_ASMR_TEST_GENERATOR=true`를 함께 설정한 테스트 환경에서만 30초 무음 PCM WAV를 생성한다. 제목에 `Test fixture`를 넣어 실제 AI 결과로 표시하지 않는다. 운영에서 사용할 공급자, 영구 파일 저장소와 음원 품질 검증은 별도 결정이 필요하다.
 
 ## 7. 전달·발신 대상별 상태·취소
 

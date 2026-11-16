@@ -46,7 +46,7 @@ H2는 빠른 로컬 확인용입니다. PostgreSQL의 스키마 제약과 동시
 
 초안을 확정할 때 `Idempotency-Key: <UUID>` 헤더와 `{"route":"SELF"}` 또는 `{"route":"FRIEND","friendId":"<user UUID>"}` 본문을 보냅니다. `POST /orbs`에도 같은 헤더가 필수입니다. 같은 키·본문의 성공 요청은 24시간 같은 결과를 반환합니다. 다른 키로 같은 구슬을 다시 확정하면 `409 ALREADY_DISPATCHED`입니다. 친구 삭제 후 새 전송은 `409 FRIENDSHIP_CHANGED`이고 이미 만들어진 기록과 수신 사본은 유지됩니다.
 
-Flyway `V2`는 H2와 PostgreSQL 공통 구조입니다. `postgres` 프로필에서만 적용하는 `V2_1`은 로그인 아이디 정규식 제약과 친구 요청·본인 기록의 부분 고유 인덱스를 추가합니다. H2에서는 로그인 아이디를 서비스 계층에서 검증하며, H2 테스트를 PostgreSQL 검증으로 간주하지 않습니다. 수신함·기록 조회·대상 취소는 3단계에 구현했고, 익명 전송은 4단계, ASMR 생성은 6단계 범위입니다.
+Flyway `V2`는 H2와 PostgreSQL 공통 구조입니다. `postgres` 프로필에서만 적용하는 `V2_1`은 로그인 아이디 정규식 제약과 친구 요청·본인 기록의 부분 고유 인덱스를 추가합니다. H2에서는 로그인 아이디를 서비스 계층에서 검증하며, H2 테스트를 PostgreSQL 검증으로 간주하지 않습니다. 수신함·기록 조회·대상 취소는 3단계, 익명 전송은 4단계, ASMR 생성 작업·플레이리스트는 6단계에 구현했습니다.
 
 Docker Desktop 엔진에 접근할 수 있는 Windows PowerShell에서는 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-stage2-postgres.ps1`로 임시 PostgreSQL 컨테이너를 띄우고 Flyway·인증·2단계 HTTP 흐름·친구 요청과 전송의 동시성 테스트를 검사할 수 있습니다. 스크립트는 고유한 컨테이너 이름과 임의의 DB 암호를 사용하고 종료 시 자신이 만든 컨테이너를 정리합니다. 실행 로그는 `build/`에 남습니다.
 
@@ -76,4 +76,4 @@ Docker Desktop 엔진에 접근할 수 있는 Windows PowerShell에서는 `power
 
 `GET /me/care`는 KST 기준 최근 7일·14일의 본인 확정 기록을 집계합니다. `GET /me/care/resources/{id}`와 `PUT /me/care/notices/{noticeId}/acknowledgement`는 검수된 콘텐츠가 등록된 경우에 사용합니다. 현재 V5에는 운영용 케어 문구·링크 seed가 없으므로 조건을 달성해도 `notice`는 null일 수 있습니다. 예시 문구를 실제 안내로 취급하지 마세요.
 
-전체 테스트는 `./gradlew.bat test`, 실제 PostgreSQL과 Flyway V1~V5·HTTP·동시성·서버 재시작 뒤 멱등 응답 복호화 검증은 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-stage5-postgres.ps1`로 실행합니다. 이 스크립트는 임시 컨테이너와 임시 비밀값을 사용하며 비밀값을 출력하지 않습니다. 실제 Expo 기기에서 알림을 받는지는 별도 빌드와 자격 증명으로 검증해야 합니다.
+전체 테스트는 `./gradlew.bat test`, 실제 PostgreSQL과 Flyway V1~V6·HTTP·동시성·서버 재시작 뒤 멱등 응답 복호화 및 6단계 ASMR 검증은 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-stage5-postgres.ps1 -IncludeStage6`로 실행합니다. 이 스크립트는 임시 컨테이너와 임시 비밀값을 사용하며 비밀값을 출력하지 않습니다. 6단계는 테스트 전용 무음 생성 구현으로 확인했으며 실제 공급자 결정 사항은 [ASMR_PROVIDER.md](docs/ASMR_PROVIDER.md)에 있습니다. 실제 Expo 기기에서 알림을 받는지는 별도 빌드와 자격 증명으로 검증해야 합니다.

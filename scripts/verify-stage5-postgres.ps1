@@ -1,4 +1,4 @@
-param([string]$Image = 'postgres:18-alpine')
+param([string]$Image = 'postgres:18-alpine', [switch]$IncludeStage6)
 
 $ErrorActionPreference = 'Stop'
 $project = (Resolve-Path (Join-Path $PSScriptRoot '..')).Path
@@ -16,6 +16,14 @@ $oldSpringProfile = $env:SPRING_PROFILES_ACTIVE
 $oldStage4Url = $env:EMORI_STAGE4_TEST_DB_URL
 $oldMidnightUrl = $env:EMORI_STAGE4_MIDNIGHT_DB_URL
 $oldStage5Url = $env:EMORI_STAGE5_TEST_DB_URL
+$oldStage6Url = $env:EMORI_STAGE6_TEST_DB_URL
+$oldFlywayLocations = $env:SPRING_FLYWAY_LOCATIONS
+$oldAuthTestUrl = $env:EMORI_AUTH_TEST_DB_URL
+$oldStage2TestUrl = $env:EMORI_STAGE2_TEST_DB_URL
+$oldContextTestUrl = $env:EMORI_CONTEXT_TEST_DB_URL
+$oldAsmrFixture = $env:EMORI_ASMR_TEST_GENERATOR
+$oldAsmrWorker = $env:EMORI_ASMR_WORKER_ENABLED
+$oldAsmrStorage = $env:EMORI_ASMR_STORAGE_ROOT
 $oldIdempotencySecret = $env:EMORI_IDEMPOTENCY_SECRET
 
 function Get-FreePort {
@@ -94,19 +102,30 @@ try {
     if ($LASTEXITCODE -ne 0) { throw 'Stage 4 HTTP smoke test failed.' }
 
     $env:EMORI_POSTGRES_TEST = 'true'
-    & .\gradlew.bat test --tests 'com.ganzi.emori.Stage2PostgresRaceTests'
-    if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL concurrency test failed.' }
     $env:EMORI_STAGE3_TEST_DB_URL = $env:DB_URL
     $env:SPRING_PROFILES_ACTIVE = 'postgres'
-    & .\gradlew.bat test --tests 'com.ganzi.emori.Stage3HttpTests'
-    if ($LASTEXITCODE -ne 0) { throw 'Stage 3 PostgreSQL HTTP and concurrency tests failed.' }
     $env:EMORI_STAGE4_TEST_DB_URL = $env:DB_URL
     $env:EMORI_STAGE4_MIDNIGHT_DB_URL = $env:DB_URL
-    & .\gradlew.bat test --tests 'com.ganzi.emori.Stage4HttpTests' --tests 'com.ganzi.emori.Stage4MidnightTests'
-    if ($LASTEXITCODE -ne 0) { throw 'Stage 4 PostgreSQL HTTP and concurrency tests failed.' }
     $env:EMORI_STAGE5_TEST_DB_URL = $env:DB_URL
-    & .\gradlew.bat test --tests 'com.ganzi.emori.Stage5HttpTests'
-    if ($LASTEXITCODE -ne 0) { throw 'Stage 5 PostgreSQL tests failed.' }
+    if (-not $IncludeStage6) {
+        & .\gradlew.bat test --tests 'com.ganzi.emori.Stage2PostgresRaceTests'
+        if ($LASTEXITCODE -ne 0) { throw 'PostgreSQL concurrency test failed.' }
+        & .\gradlew.bat test --tests 'com.ganzi.emori.Stage3HttpTests'
+        if ($LASTEXITCODE -ne 0) { throw 'Stage 3 PostgreSQL HTTP and concurrency tests failed.' }
+        & .\gradlew.bat test --tests 'com.ganzi.emori.Stage4HttpTests' --tests 'com.ganzi.emori.Stage4MidnightTests'
+        if ($LASTEXITCODE -ne 0) { throw 'Stage 4 PostgreSQL HTTP and concurrency tests failed.' }
+        & .\gradlew.bat test --tests 'com.ganzi.emori.Stage5HttpTests'
+        if ($LASTEXITCODE -ne 0) { throw 'Stage 5 PostgreSQL tests failed.' }
+    }
+    if ($IncludeStage6) {
+        $env:EMORI_STAGE6_TEST_DB_URL = $env:DB_URL
+        $env:SPRING_FLYWAY_LOCATIONS = 'classpath:db/migration,classpath:db/postgres'
+        $env:EMORI_AUTH_TEST_DB_URL = $env:DB_URL
+        $env:EMORI_STAGE2_TEST_DB_URL = $env:DB_URL
+        $env:EMORI_CONTEXT_TEST_DB_URL = $env:DB_URL
+        & .\gradlew.bat test --rerun-tasks
+        if ($LASTEXITCODE -ne 0) { throw 'Full PostgreSQL test suite failed.' }
+    }
     & powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/smoke-stage5.ps1 -BaseUrl $baseUrl
     if ($LASTEXITCODE -ne 0) { throw 'Stage 5 HTTP smoke test failed.' }
 
@@ -173,9 +192,54 @@ try {
     }
     Write-Host 'Encrypted idempotency response after server restart: PASS'
 
+    if ($IncludeStage6) {
+        Stop-Process -Id $appProcess.Id -Force
+        $appProcess.WaitForExit()
+        $env:EMORI_ASMR_TEST_GENERATOR = 'true'
+        $env:EMORI_ASMR_WORKER_ENABLED = 'false'
+        $env:EMORI_ASMR_STORAGE_ROOT = Join-Path $project "build/stage6-restart-audio-$suffix"
+        $asmrStdout = Join-Path $project "build/stage6-restart-$suffix.out.log"
+        $asmrStderr = Join-Path $project "build/stage6-restart-$suffix.err.log"
+        $appProcess = Start-Process -FilePath 'java' -ArgumentList @('-jar', $jar.FullName,
+            '--spring.profiles.active=asmr-test', "--server.port=$appPort") `
+            -WorkingDirectory $project -WindowStyle Hidden -PassThru `
+            -RedirectStandardOutput $asmrStdout -RedirectStandardError $asmrStderr
+        for ($attempt = 0; $attempt -lt 90; $attempt++) {
+            if ($appProcess.HasExited) { throw "ASMR fixture application exited. See $asmrStderr" }
+            try { $socket = [System.Net.Sockets.TcpClient]::new(); $socket.Connect('127.0.0.1', $appPort); $socket.Dispose(); break }
+            catch { Start-Sleep -Seconds 1 }
+        }
+        $asmrUser = Invoke-RestartCase 'POST' '/auth/signup' @{ loginId = 'asmr_' + $restartSuffix; password = 'test-password-123' } $null $null
+        $asmrDraft = Invoke-RestartCase 'POST' '/orbs' @{ emotionIds = @('yellow_01') } $asmrUser.session.accessToken ([guid]::NewGuid().ToString())
+        $asmrGeneration = Invoke-RestartCase 'POST' ('/orbs/' + $asmrDraft.orb.id + '/asmr-generations') @{} $asmrUser.session.accessToken ([guid]::NewGuid().ToString())
+        if ($asmrGeneration.status -ne 'QUEUED') { throw 'ASMR task was not queued before restart.' }
+        Stop-Process -Id $appProcess.Id -Force
+        $appProcess.WaitForExit()
+        $env:EMORI_ASMR_WORKER_ENABLED = 'true'
+        $appProcess = Start-Process -FilePath 'java' -ArgumentList @('-jar', $jar.FullName,
+            '--spring.profiles.active=asmr-test', "--server.port=$appPort") `
+            -WorkingDirectory $project -WindowStyle Hidden -PassThru `
+            -RedirectStandardOutput $asmrStdout -RedirectStandardError $asmrStderr
+        $asmrReady = $false
+        for ($attempt = 0; $attempt -lt 90; $attempt++) {
+            if ($appProcess.HasExited) { throw "ASMR worker application exited. See $asmrStderr" }
+            try {
+                $state = Invoke-RestartCase 'GET' ('/asmr-generations/' + $asmrGeneration.id) $null $asmrUser.session.accessToken $null
+                if ($state.status -eq 'READY') { $asmrReady = $true; break }
+                if ($state.status -eq 'FAILED' -or $state.status -eq 'PARTIAL_FAILED') { throw 'ASMR fixture generation failed after restart.' }
+            } catch [System.Net.WebException] { }
+            Start-Sleep -Seconds 1
+        }
+        if (-not $asmrReady -or $state.tracks.Count -ne 3) { throw 'ASMR queued tracks did not recover after restart.' }
+        $playback = Invoke-WebRequest -Uri ($baseUrl + '/asmr-tracks/' + $state.tracks[0].id + '/audio') `
+            -Headers @{ Authorization = 'Bearer ' + $asmrUser.session.accessToken } -UseBasicParsing
+        if ($playback.StatusCode -ne 200 -or $playback.RawContentLength -le 44) { throw 'ASMR audio was not readable after restart.' }
+        Write-Host 'ASMR queued task after server restart: PASS'
+    }
+
     $versions = docker exec $containerName psql -U emori -d emori -Atqc `
         'SELECT version FROM flyway_schema_history WHERE success=true ORDER BY installed_rank'
-    if ($LASTEXITCODE -ne 0 -or (@($versions) -join ',') -ne '1,2,2.1,3,4,5') {
+    if ($LASTEXITCODE -ne 0 -or (@($versions) -join ',') -ne '1,2,2.1,3,4,5,6') {
         throw ('Unexpected Flyway history: ' + (@($versions) -join ', '))
     }
     $constraint = docker exec $containerName psql -U emori -d emori -Atqc `
@@ -193,8 +257,11 @@ try {
     $stage5Tables = docker exec $containerName psql -U emori -d emori -Atqc `
         "SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename IN ('care_notice','care_resource','device_registration','outbox_event') ORDER BY tablename"
     if ($LASTEXITCODE -ne 0 -or @($stage5Tables).Count -ne 4) { throw 'Stage 5 PostgreSQL tables are missing.' }
+    $stage6Tables = docker exec $containerName psql -U emori -d emori -Atqc `
+        "SELECT tablename FROM pg_tables WHERE schemaname='public' AND tablename IN ('asmr_generation','asmr_track','asmr_outbox_event') ORDER BY tablename"
+    if ($LASTEXITCODE -ne 0 -or @($stage6Tables).Count -ne 3) { throw 'Stage 6 PostgreSQL tables are missing.' }
     Write-Host ('Flyway versions: ' + (@($versions) -join ', '))
-    Write-Host 'PostgreSQL stage 2-5 schema: OK'
+    Write-Host 'PostgreSQL stage 2-6 schema: OK'
     Write-Host 'PostgreSQL HTTP verification: PASS'
 } finally {
     if ($appProcess -and -not $appProcess.HasExited) { Stop-Process -Id $appProcess.Id -Force }
@@ -208,6 +275,14 @@ try {
     $env:EMORI_STAGE4_TEST_DB_URL = $oldStage4Url
     $env:EMORI_STAGE4_MIDNIGHT_DB_URL = $oldMidnightUrl
     $env:EMORI_STAGE5_TEST_DB_URL = $oldStage5Url
+    $env:EMORI_STAGE6_TEST_DB_URL = $oldStage6Url
+    $env:SPRING_FLYWAY_LOCATIONS = $oldFlywayLocations
+    $env:EMORI_AUTH_TEST_DB_URL = $oldAuthTestUrl
+    $env:EMORI_STAGE2_TEST_DB_URL = $oldStage2TestUrl
+    $env:EMORI_CONTEXT_TEST_DB_URL = $oldContextTestUrl
+    $env:EMORI_ASMR_TEST_GENERATOR = $oldAsmrFixture
+    $env:EMORI_ASMR_WORKER_ENABLED = $oldAsmrWorker
+    $env:EMORI_ASMR_STORAGE_ROOT = $oldAsmrStorage
     $env:EMORI_IDEMPOTENCY_SECRET = $oldIdempotencySecret
     Pop-Location
 }

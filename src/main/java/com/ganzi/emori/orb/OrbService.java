@@ -3,6 +3,7 @@ package com.ganzi.emori.orb;
 import com.ganzi.emori.api.ApiException;
 import com.ganzi.emori.api.DbSupport;
 import com.ganzi.emori.api.Idempotency;
+import com.ganzi.emori.asmr.AsmrService;
 import com.ganzi.emori.orb.OrbModels.*;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -22,9 +23,10 @@ public class OrbService {
     private final DbSupport db;
     private final Idempotency idempotency;
     private final ObjectMapper json;
+    private final AsmrService asmr;
 
-    public OrbService(JdbcTemplate jdbc, DbSupport db, Idempotency idempotency, ObjectMapper json) {
-        this.jdbc = jdbc; this.db = db; this.idempotency = idempotency; this.json = json;
+    public OrbService(JdbcTemplate jdbc, DbSupport db, Idempotency idempotency, ObjectMapper json, AsmrService asmr) {
+        this.jdbc = jdbc; this.db = db; this.idempotency = idempotency; this.json = json; this.asmr=asmr;
     }
 
     public EmotionCatalog emotions() {
@@ -89,7 +91,7 @@ public class OrbService {
         if (rows.isEmpty() || !rows.getFirst().author().equals(actor)) {
             throw new ApiException(HttpStatus.NOT_FOUND, "NOT_FOUND", "구슬을 찾을 수 없습니다.");
         }
-        return new OrbDetail(snapshot(id), null);
+        return new OrbDetail(snapshot(id), asmr.forOrb(actor,id));
     }
 
     // Internal snapshot loader. Callers must establish their own receipt or record ownership first.
@@ -102,7 +104,7 @@ public class OrbService {
         List<Emotion> selected = jdbc.query("""
                 SELECT emotion_id,color,area,word FROM orb_emotion WHERE orb_id=? ORDER BY position
                 """, (rs, n) -> new Emotion(rs.getString(1), rs.getString(2), rs.getString(3), rs.getString(4)), id);
-        return new Orb(id.toString(), row.kind(), selected, null, row.createdAt().toInstant().toString());
+        return new Orb(id.toString(), row.kind(), selected, asmr.playlist(id), row.createdAt().toInstant().toString());
     }
 
     private record EmotionSnapshot(int version, String id, String color, String area, String word, boolean care) {}

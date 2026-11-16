@@ -23,7 +23,7 @@ import java.util.concurrent.Executors;
 import static org.assertj.core.api.Assertions.assertThat;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.*;
 
-@SpringBootTest(properties = "spring.datasource.url=jdbc:h2:mem:auth_tests;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1")
+@SpringBootTest(properties = "spring.datasource.url=${EMORI_AUTH_TEST_DB_URL:jdbc:h2:mem:auth_tests;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE;DB_CLOSE_DELAY=-1}")
 @AutoConfigureMockMvc
 class AuthHttpTests {
     @Autowired MockMvc mvc;

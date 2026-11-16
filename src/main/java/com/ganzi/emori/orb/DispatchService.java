@@ -3,6 +3,7 @@ package com.ganzi.emori.orb;
 import com.ganzi.emori.api.ApiException;
 import com.ganzi.emori.api.DbSupport;
 import com.ganzi.emori.api.Idempotency;
+import com.ganzi.emori.asmr.AsmrService;
 import com.ganzi.emori.friend.FriendModels.UserSummary;
 import com.ganzi.emori.friend.FriendService;
 import com.ganzi.emori.push.PushOutboxService;
@@ -32,12 +33,14 @@ public class DispatchService {
     private final ObjectMapper json;
     private final Clock clock;
     private final PushOutboxService push;
+    private final AsmrService asmr;
 
     public DispatchService(JdbcTemplate jdbc, DbSupport db, Idempotency idempotency,
-                           FriendService friends, ObjectMapper json, Clock clock,PushOutboxService push) {
+                           FriendService friends, ObjectMapper json, Clock clock,PushOutboxService push,AsmrService asmr) {
         this.jdbc = jdbc; this.db = db; this.idempotency = idempotency; this.friends = friends; this.json = json;
         this.clock=clock;
         this.push=push;
+        this.asmr=asmr;
     }
 
     @Transactional
@@ -76,6 +79,7 @@ public class DispatchService {
         if(authors.isEmpty() || !actor.equals(authors.getFirst())) throw missing();
         if(jdbc.queryForObject("SELECT COUNT(*) FROM dispatch WHERE orb_id=?",Integer.class,orbId)>0)
             throw new ApiException(HttpStatus.CONFLICT,"ALREADY_DISPATCHED","이미 확정된 구슬입니다.");
+        asmr.requireReady(orbId);
         String state=jdbc.queryForObject("SELECT adult_status FROM app_user WHERE id=?",String.class,actor);
         if(!"VERIFIED_19_PLUS".equals(state))
             throw new ApiException(HttpStatus.FORBIDDEN,"AGE_REQUIRED","연령 확인이 필요합니다.");
@@ -143,6 +147,7 @@ public class DispatchService {
         if (jdbc.queryForObject("SELECT COUNT(*) FROM dispatch WHERE orb_id=?", Integer.class, orbId) > 0) {
             throw new ApiException(HttpStatus.CONFLICT, "ALREADY_DISPATCHED", "이미 확정한 구슬입니다.");
         }
+        asmr.requireReady(orbId);
         if (recipient != null && !friends.friends(actor, recipient)) {
             throw new ApiException(HttpStatus.CONFLICT, "FRIENDSHIP_CHANGED", "현재 친구 관계를 확인해주세요.");
         }
