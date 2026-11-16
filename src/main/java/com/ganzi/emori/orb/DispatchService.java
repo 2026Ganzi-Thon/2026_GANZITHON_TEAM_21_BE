@@ -5,6 +5,7 @@ import com.ganzi.emori.api.DbSupport;
 import com.ganzi.emori.api.Idempotency;
 import com.ganzi.emori.friend.FriendModels.UserSummary;
 import com.ganzi.emori.friend.FriendService;
+import com.ganzi.emori.push.PushOutboxService;
 import com.ganzi.emori.orb.DispatchModels.*;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -30,11 +31,13 @@ public class DispatchService {
     private final FriendService friends;
     private final ObjectMapper json;
     private final Clock clock;
+    private final PushOutboxService push;
 
     public DispatchService(JdbcTemplate jdbc, DbSupport db, Idempotency idempotency,
-                           FriendService friends, ObjectMapper json, Clock clock) {
+                           FriendService friends, ObjectMapper json, Clock clock,PushOutboxService push) {
         this.jdbc = jdbc; this.db = db; this.idempotency = idempotency; this.friends = friends; this.json = json;
         this.clock=clock;
+        this.push=push;
     }
 
     @Transactional
@@ -115,6 +118,7 @@ public class DispatchService {
                     VALUES (?,?,?,NULL,?,'RECEIVED',?)
                     """,UUID.randomUUID(),recipient,dispatchId,receiptId,now);
             increaseUsage(recipient,date,0,1,now);
+            push.enqueue(receiptId,recipient);
         }
         return new DispatchResponse(get(actor,dispatchId.toString()),recordId.toString());
     }
@@ -162,6 +166,7 @@ public class DispatchService {
                     INSERT INTO emotion_record(id,owner_id,dispatch_id,own_dispatch_id,receipt_id,side,recorded_at)
                     VALUES (?,?,?,NULL,?,'RECEIVED',?)
                     """, UUID.randomUUID(), recipient, dispatchId, receiptId, now);
+            push.enqueue(receiptId,recipient);
         }
         return new DispatchResponse(get(actor, dispatchId.toString()), recordId.toString());
     }

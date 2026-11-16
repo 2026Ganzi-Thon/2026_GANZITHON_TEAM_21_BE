@@ -49,7 +49,7 @@ HTTPS JSON, camelCase, 인증은 `Authorization: Bearer <accessToken>`. 공개 A
 | POST /auth/signup · 공개 | `{loginId,password,nickname?}` | 201 `{user:Me,session:Session}`. 409 LOGIN_ID_IN_USE |
 | POST /auth/login · 공개 | `{loginId,password}` | 200 `{user:Me,session:Session}`. 401 INVALID_CREDENTIALS |
 | POST /auth/refresh · 공개 | `{refreshToken}` | 200 Session. 토큰 회전·이전 토큰 무효화, 실패 401 INVALID_SESSION |
-| POST /auth/logout | `{}` | 204. 현재 access 세션에 연결된 refresh 세션 무효화. 기기 푸시 등록은 별도 DELETE 후 로그아웃 |
+| POST /auth/logout | `{}` | 204. 현재 access 세션에 연결된 refresh 세션 무효화 및 해당 세션의 기기 푸시 등록 해제. 별도 DELETE도 가능 |
 | GET /me | — | 200 Me |
 | PUT /me/profile | `{nickname}` | 200 Me |
 

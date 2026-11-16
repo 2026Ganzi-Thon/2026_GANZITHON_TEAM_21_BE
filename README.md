@@ -67,3 +67,13 @@ Docker Desktop 엔진에 접근할 수 있는 Windows PowerShell에서는 `power
 익명 최초 `POST /receipts/{id}/open`에는 `actions=["REACT","QUIET"]`와 10분짜리 `actionToken`이 포함됩니다. `POST /receipts/{id}/reaction`은 `{"actionToken":"...","code":"HEART"}`와 멱등키를 보내며 사본당 한 번만 성공합니다. `POST /receipts/{id}/finish`는 같은 토큰으로 반응 기회를 닫고 204를 반환합니다. 재진입도 반응 기회를 닫습니다. `POST /receipts/{id}/reports`는 `{"reasonCode":"OTHER","detail":"..."}`와 멱등키를 사용하고, `PUT /receipts/{id}/anonymous-block`은 `{}`로 익명 발신자를 이후 양방향 매칭에서 제외합니다.
 
 로컬 H2를 포함한 기본 검증은 `./gradlew.bat test`입니다. Docker Desktop이 실행 중이면 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-stage4-postgres.ps1`로 임시 PostgreSQL에서 V1~V4, 실제 HTTP와 동시 요청을 검증합니다. 이 스크립트가 만드는 계정의 성인 상태는 임시 테스트 DB에서만 직접 부여하며 실제 연령 인증을 의미하지 않습니다. 익명 최초 열람의 멱등 응답에는 비밀 토큰이 들어 있으므로 운영·지속 실행 환경에서는 32바이트 난수를 Base64로 인코딩한 `EMORI_IDEMPOTENCY_SECRET`을 환경변수로 고정해야 합니다. 값이 없으면 개발용 프로세스 키가 생성되어 재시작 전 멱등 응답 복호화만 가능합니다. 비밀값 자체를 저장소에 넣지 마세요.
+
+## 5단계: 휴식·케어·기기 등록·푸시 outbox
+
+`PUT /me/rest`는 `{"mode":"MANUAL"}`, `{"mode":"OFF"}`, 또는 미래 KST 자정 경계의 `{"mode":"SCHEDULED","startsAt":"2026-11-30T15:00:00Z","endsAt":"2026-12-02T15:00:00Z"}`를 받습니다. 휴식 중에도 `GET /inbox`에는 수신 사본이 남고 푸시는 발송되지 않습니다. `PATCH /me/settings`의 `pushEnabled` 값은 휴식 설정과 독립적입니다.
+
+`PUT /me/devices/{installationId}`에 `{"platform":"ANDROID","deliveryToken":"ExponentPushToken[...]"}` 또는 IOS 플랫폼을 보내 설치별 토큰을 등록합니다. `DELETE /me/devices/{installationId}`로 해제하고, 로그아웃 시 현재 세션에 연결된 등록도 해제됩니다. 같은 설치가 다른 계정으로 등록되면 이전 계정의 대기 작업은 새 계정으로 전송되지 않습니다. 워커는 기본적으로 꺼져 있으며 실제 Expo 전송을 사용하려면 `PUSH_WORKER_ENABLED=true`와 고정된 `EMORI_IDEMPOTENCY_SECRET`을 설정하고 필요한 경우 `EXPO_ACCESS_TOKEN`을 제공해야 합니다. 푸시 토큰은 암호화해 저장하며 비밀값은 로그나 저장소에 남기지 마세요.
+
+`GET /me/care`는 KST 기준 최근 7일·14일의 본인 확정 기록을 집계합니다. `GET /me/care/resources/{id}`와 `PUT /me/care/notices/{noticeId}/acknowledgement`는 검수된 콘텐츠가 등록된 경우에 사용합니다. 현재 V5에는 운영용 케어 문구·링크 seed가 없으므로 조건을 달성해도 `notice`는 null일 수 있습니다. 예시 문구를 실제 안내로 취급하지 마세요.
+
+전체 테스트는 `./gradlew.bat test`, 실제 PostgreSQL과 Flyway V1~V5·HTTP·동시성·서버 재시작 뒤 멱등 응답 복호화 검증은 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/verify-stage5-postgres.ps1`로 실행합니다. 이 스크립트는 임시 컨테이너와 임시 비밀값을 사용하며 비밀값을 출력하지 않습니다. 실제 Expo 기기에서 알림을 받는지는 별도 빌드와 자격 증명으로 검증해야 합니다.

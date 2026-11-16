@@ -27,16 +27,22 @@ public class IdempotencyResponseCipher {
     }
     public String protect(String json) {
         if(!json.contains("\"actionToken\":\"")) return json;
+        return encryptSecret(json);
+    }
+    public String encryptSecret(String value) {
         try {
             byte[] nonce=new byte[12]; random.nextBytes(nonce);
             Cipher cipher=Cipher.getInstance("AES/GCM/NoPadding");
             cipher.init(Cipher.ENCRYPT_MODE,key,new GCMParameterSpec(128,nonce));
-            byte[] encrypted=cipher.doFinal(json.getBytes(StandardCharsets.UTF_8));
+            byte[] encrypted=cipher.doFinal(value.getBytes(StandardCharsets.UTF_8));
             return "enc:v1:"+Base64.getEncoder().encodeToString(nonce)+":"+Base64.getEncoder().encodeToString(encrypted);
         } catch(Exception e) { throw new IllegalStateException("Could not encrypt idempotent response",e); }
     }
     public String reveal(String stored) {
         if(!stored.startsWith("enc:v1:")) return stored;
+        return decryptSecret(stored);
+    }
+    public String decryptSecret(String stored) {
         try {
             String[] parts=stored.split(":",4);
             byte[] nonce=Base64.getDecoder().decode(parts[2]);

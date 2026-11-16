@@ -8,6 +8,9 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import java.time.OffsetDateTime;
+import java.time.Clock;
+import java.time.ZoneId;
+import java.time.ZoneOffset;
 import java.util.List;
 import java.util.UUID;
 
@@ -15,7 +18,8 @@ import java.util.UUID;
 public class SettingsService {
     private final JdbcTemplate jdbc;
     private final DbSupport db;
-    public SettingsService(JdbcTemplate jdbc, DbSupport db) { this.jdbc = jdbc; this.db = db; }
+    private final Clock clock;
+    public SettingsService(JdbcTemplate jdbc, DbSupport db,Clock clock) { this.jdbc = jdbc; this.db = db; this.clock=clock; }
 
     public Settings get(UUID actor) {
         return jdbc.queryForObject("""
@@ -50,5 +54,50 @@ public class SettingsService {
                 push_enabled=COALESCE(?,push_enabled),updated_at=? WHERE user_id=?
                 """,input.anonymousEnabled(),input.pushEnabled(),DbSupport.now(),actor);
         return get(actor);
+    }
+
+    @Transactional
+    public Rest rest(UUID actor,RestUpdate input) {
+        if(input==null || input.mode()==null) throw ApiException.invalid("mode is required");
+        db.lockUsers(actor);
+        OffsetDateTime now=OffsetDateTime.now(clock).withOffsetSameInstant(ZoneOffset.UTC);
+        switch(input.mode()) {
+            case "OFF" -> {
+                if(input.startsAt()!=null || input.endsAt()!=null) throw ApiException.invalid("OFF has no dates");
+                jdbc.update("""
+                    UPDATE user_settings SET rest_mode='OFF',rest_starts_at=NULL,rest_ends_at=NULL,updated_at=?
+                    WHERE user_id=?
+                    """,now,actor);
+            }
+            case "MANUAL" -> {
+                if(input.startsAt()!=null || input.endsAt()!=null) throw ApiException.invalid("MANUAL has no dates");
+                jdbc.update("""
+                    UPDATE user_settings SET rest_mode='MANUAL',rest_starts_at=?,rest_ends_at=NULL,updated_at=?
+                    WHERE user_id=?
+                    """,now,now,actor);
+            }
+            case "SCHEDULED" -> {
+                OffsetDateTime starts=parse(input.startsAt()),ends=parse(input.endsAt());
+                ZoneId kst=ZoneId.of("Asia/Seoul");
+                if(!starts.isBefore(ends) || starts.atZoneSameInstant(kst).toLocalTime().toSecondOfDay()!=0 ||
+                    ends.atZoneSameInstant(kst).toLocalTime().toSecondOfDay()!=0)
+                    throw ApiException.invalid("Schedule must use KST day boundaries");
+                Settings current=get(actor);
+                if(!starts.isAfter(now) && !(current.rest().mode().equals("SCHEDULED") &&
+                    starts.toInstant().toString().equals(current.rest().startsAt()) &&
+                    ends.toInstant().toString().equals(current.rest().endsAt())))
+                    throw ApiException.invalid("Schedule start must be in the future");
+                jdbc.update("""
+                    UPDATE user_settings SET rest_mode='SCHEDULED',rest_starts_at=?,rest_ends_at=?,updated_at=?
+                    WHERE user_id=?
+                    """,starts,ends,now,actor);
+            }
+            default -> throw ApiException.invalid("Invalid rest mode");
+        }
+        return get(actor).rest();
+    }
+    private static OffsetDateTime parse(String value) {
+        try { if(value==null) throw new IllegalArgumentException(); return OffsetDateTime.parse(value); }
+        catch(RuntimeException e) { throw ApiException.invalid("Valid RFC 3339 times are required"); }
     }
 }

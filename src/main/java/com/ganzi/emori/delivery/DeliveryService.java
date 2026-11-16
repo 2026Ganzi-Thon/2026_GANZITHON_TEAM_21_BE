@@ -9,6 +9,7 @@ import com.ganzi.emori.delivery.DeliveryModels.*;
 import com.ganzi.emori.friend.FriendModels.UserSummary;
 import com.ganzi.emori.orb.DispatchService;
 import com.ganzi.emori.orb.OrbService;
+import com.ganzi.emori.push.PushOutboxService;
 import org.springframework.http.HttpStatus;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.stereotype.Service;
@@ -34,11 +35,12 @@ public class DeliveryService {
     private final Idempotency idempotency;
     private final OrbService orbs;
     private final DispatchService dispatches;
+    private final PushOutboxService push;
 
     public DeliveryService(JdbcTemplate jdbc, DbSupport db, Idempotency idempotency,
-                           OrbService orbs, DispatchService dispatches) {
+                           OrbService orbs, DispatchService dispatches,PushOutboxService push) {
         this.jdbc = jdbc; this.db = db; this.idempotency = idempotency;
-        this.orbs = orbs; this.dispatches = dispatches;
+        this.orbs = orbs; this.dispatches = dispatches; this.push=push;
     }
 
     public Page<Receipt> inbox(UUID actor, boolean unreadOnly, String dateText, String token, Integer requestedLimit) {
@@ -154,6 +156,7 @@ public class DeliveryService {
                     UPDATE receipt SET cancelled_at=? WHERE id=? AND opened_at IS NULL AND cancelled_at IS NULL
                     """, now, selected.receiptId());
             if (changed != 1) throw new ApiException(HttpStatus.CONFLICT, "CANCEL_NOT_ALLOWED", "취소할 수 없는 수신 대상입니다.");
+            push.cancel(selected.receiptId());
             return Map.of("dispatch", dispatches.get(actor, dispatchId.toString()));
         });
     }

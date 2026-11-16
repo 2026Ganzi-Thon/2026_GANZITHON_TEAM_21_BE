@@ -109,6 +109,7 @@ public class AuthService {
     @Transactional
     public void logout(String bearer) {
         String hash = tokenHash(bearerToken(bearer));
+        jdbc.update("DELETE FROM device_registration WHERE session_id IN (SELECT id FROM auth_session WHERE access_token_hash=?)",hash);
         jdbc.update("UPDATE auth_session SET revoked_at=?,updated_at=? WHERE access_token_hash=? AND revoked_at IS NULL",
                 utcNow(), utcNow(), hash);
     }
