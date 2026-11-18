@@ -1,0 +1,31 @@
+spring:
+  application:
+    name: EmOri
+  datasource:
+    url: ${DB_URL:jdbc:h2:file:./data/emori;MODE=PostgreSQL;DATABASE_TO_LOWER=TRUE}
+    username: ${DB_USERNAME:sa}
+    password: ${DB_PASSWORD:}
+  flyway:
+    enabled: true
+  jackson:
+    deserialization:
+      fail-on-unknown-properties: true
+
+emori:
+  auth:
+    access-seconds: ${AUTH_ACCESS_SECONDS:900}
+    refresh-seconds: ${AUTH_REFRESH_SECONDS:2592000}
+
+---
+spring:
+  config:
+    activate:
+      on-profile: postgres
+  datasource:
+    url: ${DB_URL}
+    username: ${DB_USERNAME}
+    password: ${DB_PASSWORD}
+  flyway:
+    locations:
+      - classpath:db/migration
+      - classpath:db/postgres
