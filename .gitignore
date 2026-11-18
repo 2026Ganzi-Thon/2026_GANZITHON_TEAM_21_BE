@@ -1,46 +1,30 @@
-### Gradle ###
-.gradle/
+HELP.md
+.gradle
 build/
 !gradle/wrapper/gradle-wrapper.jar
 !**/src/main/**/build/
 !**/src/test/**/build/
 
-### 로컬 H2 데이터베이스 ###
-data/
-*.mv.db
-*.trace.db
-
-### 환경변수와 비밀 설정 ###
-.env
-.env.*
-!.env.example
-application-secret.properties
-application-secret.yml
-application-secret.yaml
-
-### 로그 ###
-*.log
+### STS ###
+.apt_generated
+.classpath
+.factorypath
+.project
+.settings
+.springBeans
+.sts4-cache
+bin/
+!**/src/main/**/bin/
+!**/src/test/**/bin/
 
 ### IntelliJ IDEA ###
-.idea/
+.idea
 *.iws
 *.iml
 *.ipr
 out/
 !**/src/main/**/out/
 !**/src/test/**/out/
-
-### STS / Eclipse ###
-.apt_generated/
-.classpath
-.factorypath
-.project
-.settings/
-.springBeans
-.sts4-cache/
-bin/
-!**/src/main/**/bin/
-!**/src/test/**/bin/
 
 ### NetBeans ###
 /nbproject/private/
@@ -51,7 +35,13 @@ bin/
 
 ### VS Code ###
 .vscode/
-
-### 운영체제 ###
-.DS_Store
-Thumbs.db
+data/
+.env
+.env.*
+!.env.example
+*.env.local
+*.db
+*.mv.db
+*.trace.db
+*.log
+secrets/

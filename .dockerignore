@@ -1,0 +1,10 @@
+.git
+.gradle
+build
+data
+.env
+.env.*
+!.env.example
+.idea
+*.iml
+secrets
