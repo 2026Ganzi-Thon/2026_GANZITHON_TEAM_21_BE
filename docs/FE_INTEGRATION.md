@@ -1,5 +1,24 @@
 # 8단계 FE 연동 인계
 
+## 2026-11-18 확정 연동: 샘플 음원과 생년월일
+
+운영 카탈로그에는 팀이 직접 합성한 14.9초 PCM WAV 7곡을 등록했다. `GET /api/v1/catalog/sounds`에서 각 ID와 `playbackUrl`을 받는다. 제목과 색: 햇살 산책/YELLOW, 설레는 걸음/ORANGE, 포근한 오후/PINK, 가라앉히는 숨/RED, 창밖의 빗소리/PURPLE, 잔잔한 파도/BLUE, 숲속 시냇물/GREEN. 생성 요청은 `{"colors":["BLUE"],"soundId":"<catalog id>"}`이며 음원 없이도 가능하다. 미리듣기와 첨부 재생 URL에는 `Authorization: Bearer <accessToken>`을 붙인다.
+
+가입 직후 `PUT /api/v1/me/birth-date`를 호출한다. 기존 계정은 익명 기능을 처음 켜기 전에 호출한다.
+
+```http
+PUT /api/v1/me/birth-date
+Authorization: Bearer <accessToken>
+Content-Type: application/json
+
+{"birthDate":"2001-05-19"}
+```
+
+성공 시 `200 {"id":"...","loginId":"...","nickname":"...","friendCode":"...","adultStatus":"SELF_REPORTED_19_PLUS"}` 형태의 Me가 반환된다. 생년월일은 자기신고이고 기존 `VERIFIED_19_PLUS`는 유지된다. 만 19세 미만은 `SELF_REPORTED_UNDER_19`, 미입력은 `UNKNOWN`으로 익명 설정과 발신이 403 `AGE_REQUIRED`다. 한국 시간 생일 기준이며 2월 29일생은 평년 3월 1일에 19세가 된다. 생년월일은 PUT으로 재입력할 수 있다. 만 19세 미만으로 등록했던 사용자는 19세 생일 이후 PUT을 다시 호출해야 상태가 갱신된다. 가입 요청 자체에는 `birthDate`를 넣지 않는다.
+
+친구 전송은 `friendId` 한 명, 취소는 대상별 API를 사용한다. 복수 친구 전송과 전체 취소는 이번 FE 범위에서 제외했다. 아래 8단계 미결정 표와 음원 미등록 설명은 당시 기록이며 이 절의 확정 계약이 우선한다.
+
+
 현재 서버는 색 1~2개와 선택적 사전 음원 1곡으로 구슬을 만듭니다. 신규 구슬은 AI 생성 호출이나 대기 없이 전송합니다. `GET /inbox`는 열람 처리 없이 `orb`를 포함하고, 기록 목록·상세에는 `counterpart`가 포함됩니다.
 
 | 항목 | 현재 서버 상태 |

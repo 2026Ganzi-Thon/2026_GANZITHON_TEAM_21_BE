@@ -7,6 +7,7 @@ public final class AuthModels {
     public record LoginRequest(String loginId, String password) {}
     public record RefreshRequest(String refreshToken) {}
     public record ProfileRequest(String nickname) {}
+    public record BirthDateRequest(String birthDate) {}
     public record Me(String id, String loginId, String nickname, String friendCode, String adultStatus) {}
     public record Session(String accessToken, String refreshToken, long expiresIn) {}
     public record AuthResponse(Me user, Session session) {}

@@ -13,8 +13,12 @@ import java.nio.charset.StandardCharsets;
 import java.security.MessageDigest;
 import java.security.SecureRandom;
 import java.time.Instant;
+import java.time.Clock;
+import java.time.LocalDate;
 import java.time.OffsetDateTime;
+import java.time.ZoneId;
 import java.time.ZoneOffset;
+import java.time.format.DateTimeParseException;
 import java.util.Base64;
 import java.util.HexFormat;
 import java.util.List;
@@ -32,8 +36,9 @@ public class AuthService {
     private final long accessSeconds;
     private final long refreshSeconds;
     private final String dummyHash;
+    private final Clock clock;
 
-    public AuthService(JdbcTemplate jdbc, PasswordHasher passwords,
+    public AuthService(JdbcTemplate jdbc, PasswordHasher passwords, Clock clock,
                        @Value("${emori.auth.access-seconds}") long accessSeconds,
                        @Value("${emori.auth.refresh-seconds}") long refreshSeconds) {
         if (accessSeconds < 1 || refreshSeconds < accessSeconds) {
@@ -41,6 +46,7 @@ public class AuthService {
         }
         this.jdbc = jdbc;
         this.passwords = passwords;
+        this.clock = clock;
         this.accessSeconds = accessSeconds;
         this.refreshSeconds = refreshSeconds;
         this.dummyHash = passwords.hash("dummy-password-for-login-timing");
@@ -137,6 +143,32 @@ public class AuthService {
         if (request == null) throw ApiException.invalid("닉네임을 입력해주세요.");
         jdbc.update("UPDATE app_user SET nickname=?,updated_at=? WHERE id=?", nickname(request.nickname()), utcNow(), id);
         return me(id);
+    }
+
+    @Transactional
+    public Me updateBirthDate(UUID id, BirthDateRequest request) {
+        if (request == null || request.birthDate() == null ||
+                !request.birthDate().matches("\\d{4}-\\d{2}-\\d{2}"))
+            throw ApiException.invalid("birthDate must be YYYY-MM-DD");
+        LocalDate birthDate;
+        try { birthDate = LocalDate.parse(request.birthDate()); }
+        catch (DateTimeParseException e) { throw ApiException.invalid("Invalid birthDate"); }
+        LocalDate today = LocalDate.now(clock.withZone(ZoneId.of("Asia/Seoul")));
+        if (birthDate.isAfter(today)) throw ApiException.invalid("birthDate cannot be in the future");
+        // A leap-day birthday reaches the yearly age on March 1 in non-leap years.
+        String reported = isAdult(birthDate, today) ? "SELF_REPORTED_19_PLUS" : "SELF_REPORTED_UNDER_19";
+        jdbc.update("""
+                UPDATE app_user SET birth_date=?,adult_status=CASE WHEN adult_status='VERIFIED_19_PLUS'
+                    THEN adult_status ELSE ? END,adult_checked_at=?,updated_at=? WHERE id=?
+                """, birthDate, reported, utcNow(), utcNow(), id);
+        return me(id);
+    }
+
+    static boolean isAdult(LocalDate birthDate, LocalDate today) {
+        LocalDate nineteenth = birthDate.plusYears(19);
+        if (birthDate.getMonthValue() == 2 && birthDate.getDayOfMonth() == 29 && !nineteenth.isLeapYear())
+            nineteenth = LocalDate.of(nineteenth.getYear(), 3, 1);
+        return !today.isBefore(nineteenth);
     }
 
     private Session createSession(UUID userId) {

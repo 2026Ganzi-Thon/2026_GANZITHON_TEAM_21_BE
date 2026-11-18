@@ -60,7 +60,7 @@ public class DispatchService {
         }
         if ("ANONYMOUS".equals(input.route())) {
             // Include adults whose toggle is currently OFF, so ON/OFF and matching share the same user-row locks.
-            List<UUID> adults=jdbc.query("SELECT id FROM app_user WHERE adult_status='VERIFIED_19_PLUS'",
+            List<UUID> adults=jdbc.query("SELECT id FROM app_user WHERE adult_status IN ('VERIFIED_19_PLUS','SELF_REPORTED_19_PLUS')",
                     (rs,n)->rs.getObject(1,UUID.class));
             List<UUID> locks=new ArrayList<>(adults); locks.add(actor);
             db.lockUsers(locks.toArray(UUID[]::new));
@@ -81,7 +81,7 @@ public class DispatchService {
             throw new ApiException(HttpStatus.CONFLICT,"ALREADY_DISPATCHED","이미 확정된 구슬입니다.");
         asmr.requireReady(orbId);
         String state=jdbc.queryForObject("SELECT adult_status FROM app_user WHERE id=?",String.class,actor);
-        if(!"VERIFIED_19_PLUS".equals(state))
+        if(!"VERIFIED_19_PLUS".equals(state) && !"SELF_REPORTED_19_PLUS".equals(state))
             throw new ApiException(HttpStatus.FORBIDDEN,"AGE_REQUIRED","연령 확인이 필요합니다.");
         Boolean enabled=jdbc.queryForObject("SELECT anonymous_enabled FROM user_settings WHERE user_id=?",Boolean.class,actor);
         if(!Boolean.TRUE.equals(enabled))
@@ -97,7 +97,7 @@ public class DispatchService {
         List<UUID> recipients=jdbc.query("""
                 SELECT u.id FROM app_user u JOIN user_settings s ON s.user_id=u.id
                 LEFT JOIN anon_daily_usage usage ON usage.user_id=u.id AND usage.usage_date=?
-                WHERE u.id<>? AND u.adult_status='VERIFIED_19_PLUS' AND s.anonymous_enabled=TRUE
+                WHERE u.id<>? AND u.adult_status IN ('VERIFIED_19_PLUS','SELF_REPORTED_19_PLUS') AND s.anonymous_enabled=TRUE
                   AND COALESCE(usage.received_count,0)<3
                   AND NOT EXISTS (SELECT 1 FROM anonymous_block b WHERE
                       (b.blocker_id=? AND b.blocked_id=u.id) OR (b.blocker_id=u.id AND b.blocked_id=?))

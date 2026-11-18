@@ -96,3 +96,13 @@ curl -i https://api.gaebalmani.shop/api/v1/catalog/sounds
 - `sudo docker compose down`은 컨테이너만 내린다. `down -v`는 DB·음원·인증서 볼륨을 지우므로 실행하지 않는다.
 - `.env`, DB 볼륨, 음원 볼륨은 별도로 백업한다. 앱 이미지 재빌드는 이 데이터를 백업하지 않는다.
 - 첫 EC2 검증 전에는 브랜치를 병합하거나 GitHub Actions 배포를 켜지 않는다.
+# 2026-11-18 추가: 제공 음원 등록
+
+팀이 전달한 `EmOri_샘플음악_WAV_백엔드용.zip`의 WAV 7곡은 Git 저장소에 넣지 않고 EC2의 `/home/ubuntu/emori-samples`에 압축을 풀어 등록한다. 제목·색은 ZIP의 목록.txt를 따른다. 앱 컨테이너가 사용하는 `asmr_data` 볼륨에 파일이 복사되며 DB `sound_catalog`에 1~15000ms 검증 후 등록된다. 예를 들어 파랑 음원은 아래처럼 등록한다. 재실행하면 새 ID가 추가되므로 등록 전에 카탈로그에 같은 제목·색이 없는지 확인한다.
+
+```bash
+cd /home/ubuntu/EmOri
+sudo docker compose run --rm --no-deps -v /home/ubuntu/emori-samples/sample-blue.wav:/tmp/import.wav:ro app --spring.profiles.active=postgres,sound-import --spring.main.web-application-type=none --emori.sound-import.file=/tmp/import.wav '--emori.sound-import.title=잔잔한 파도' --emori.sound-import.color=BLUE
+```
+
+`GET /api/v1/catalog/sounds`에는 활성 상태이고 저장 파일이 있는 음원만 나타난다. Bearer 토큰이 필요하다.

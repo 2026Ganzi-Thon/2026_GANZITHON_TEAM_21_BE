@@ -46,7 +46,8 @@ public class SettingsService {
         if (Boolean.TRUE.equals(input.anonymousEnabled())) {
             List<String> states=jdbc.query("SELECT adult_status FROM app_user WHERE id=?",
                     (rs,n)->rs.getString(1),actor);
-            if (states.isEmpty() || !states.getFirst().equals("VERIFIED_19_PLUS"))
+            if (states.isEmpty() || !(states.getFirst().equals("VERIFIED_19_PLUS") ||
+                    states.getFirst().equals("SELF_REPORTED_19_PLUS")))
                 throw new ApiException(HttpStatus.FORBIDDEN,"AGE_REQUIRED","Age verification is required");
         }
         jdbc.update("""
