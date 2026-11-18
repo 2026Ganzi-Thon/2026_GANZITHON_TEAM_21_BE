@@ -1,4 +1,42 @@
-# 7단계 FE 연동 인계
+# 8단계 FE 연동 인계
+
+현재 서버는 색 1~2개와 선택적 사전 음원 1곡으로 구슬을 만듭니다. 신규 구슬은 AI 생성 호출이나 대기 없이 전송합니다. `GET /inbox`는 열람 처리 없이 `orb`를 포함하고, 기록 목록·상세에는 `counterpart`가 포함됩니다.
+
+| 항목 | 현재 서버 상태 |
+|---|---|
+| 가입 시 생년월일·자기신고 성인 판정 | `birthDate` 저장과 `PUT /me/birth-date` 없음. 새 계정은 `UNKNOWN`이며 익명 활성화 불가 |
+| 색 1~2개 선택과 색별 단어 자동 매핑 | `colors`를 받으며 색마다 영역·단어 4개를 서버가 스냅샷 저장. 이전 `emotionIds` 구슬도 조회 가능 |
+| 15초 이하 제공 음원 1곡 | `GET /catalog/sounds`, 선택적 `soundId`, 재생 API 구현. 운영 카탈로그는 실제 파일 등록 전 비어 있음 |
+| `friendIds` 복수 친구 전송·전체 취소 | `friendId` 한 명 전송과 수신 대상별 취소만 제공 |
+| 수신함의 `orb`, 기록의 `counterpart` | 현재 응답에 있음. 익명 counterpart는 null |
+
+## 프론트 교체 계약
+
+요청마다 `Authorization: Bearer <accessToken>`을 보내고, `POST /orbs`와 전송 요청에는 새 사용자 동작마다 UUID `Idempotency-Key`를 만듭니다. 네트워크 재시도에는 같은 키를 재사용합니다. 기본 경로는 `/api/v1`입니다.
+
+```json
+{"colors":["BLUE","PURPLE"],"soundId":"<GET /catalog/sounds의 id>"}
+```
+
+`soundId`는 생략하거나 `null`로 보낼 수 있습니다. 응답은 `201 {"orb":{"id":"...","kind":"MIXED","emotions":[{"color":"BLUE","area":"가라앉음","words":["가라앉음","외로움","무기력","지침"]},{"color":"PURPLE","area":"복잡함·불안","words":["불안","막막함","복잡함","생각이 많음"]}],"playlist":{"id":"<soundId>","status":"READY","tracks":[{"id":"<soundId>","order":1,"title":"...","durationMs":1000,"playbackUrl":"/api/v1/orbs/<orbId>/sound/audio"}]},"createdAt":"..."},"recordId":null}` 형식입니다. 음원이 없으면 `playlist:null`입니다. 중복·미등록 색과 미등록·비활성 음원은 422 `INVALID_INPUT`입니다.
+
+`GET /catalog/sounds`는 `{items:[{id,title,color,durationMs,playbackUrl}]}`를 반환합니다. `color`는 `null`일 수 있습니다. 목록의 `playbackUrl`은 활성 음원 미리듣기용이고, 구슬의 `playlist.tracks[0].playbackUrl`은 첨부 후 재생용입니다. 두 URL 모두 상대 경로이며 **Bearer 헤더가 필요**합니다. Expo에서는 앱 API 기준 호스트와 상대 경로를 결합해 인증 헤더를 붙인 요청으로 WAV 바이트를 받거나, 인증 헤더를 지원하는 오디오 플레이어에 URI와 헤더를 전달합니다. 예: `GET /api/v1/orbs/<orbId>/sound/audio` + `Authorization: Bearer <accessToken>`. 카탈로그에서 숨긴 음원도 기존 구슬 URL에서는 계속 재생됩니다. 과거 비공개 AI 트랙은 기존 `/api/v1/asmr-tracks/{id}/audio` 권한 검사를 유지합니다.
+
+친구 전송은 `POST /orbs/{orbId}/dispatches` 본문 `{"route":"FRIEND","friendId":"<userId>"}`입니다. SELF·ANONYMOUS도 기존 계약을 사용합니다. `friendIds` 배열과 전체 취소 API는 아직 없습니다. 대상별 취소는 `POST /dispatches/{dispatchId}/targets/{targetId}/cancel`입니다. 신규 구슬에서 `POST /orbs/{orbId}/asmr-generations`를 호출하면 409 `ACTION_NOT_ALLOWED`입니다. 생성 상태 조회·retry·3트랙 재생 화면과 외부 생성 호출을 신규 흐름에서 제거하세요. 과거 AI 기록 조회·재생 기능은 유지합니다.
+
+## 실제 음원 등록
+
+운영 음원 파일은 아직 받지 않았으므로 카탈로그는 비어 있습니다. 팀의 사용 권한을 확인한 **PCM WAV, 무가사, 1~15000ms** 파일을 준비한 뒤, 서버가 사용하는 동일한 `EMORI_ASMR_STORAGE_ROOT`를 설정하고 다음 명령으로 등록합니다. 명령은 파일의 실제 프레임 수와 재생률을 검증하고 저장소에 복사한 후 DB에 등록하며 ID를 출력합니다. 제목·색은 실제 음원에 맞게 바꿉니다. 운영 PostgreSQL에서는 `postgres,sound-import` 프로필과 `DB_URL`·`DB_USERNAME`·`DB_PASSWORD`를 사용합니다. 파일 저장소는 재생 서버에서도 읽을 수 있어야 합니다.
+
+```powershell
+.\gradlew.bat bootRun --args='--spring.profiles.active=postgres,sound-import --spring.main.web-application-type=none --emori.sound-import.file=C:\path\approved.wav --emori.sound-import.title=ApprovedSound --emori.sound-import.color=BLUE'
+```
+
+## 미합의 항목
+
+친구 복수 전송 인원·부분 성공·전체 취소, 생년월일 가입 필수 여부·만 19세 경계·재입력·`adultStatus` 표현, 과거 케어 기록 소급 적용과 최종 안내 문구는 합의 후 계약을 정합니다. 현재 신규 계정은 `UNKNOWN`이며 익명 기능이 제한됩니다. `VERIFIED_19_PLUS`의 기존 의미도 변경하지 않았습니다.
+
+## 7단계 보관 내용 (아래의 감정 ID·AI 생성 안내는 신규 흐름에 적용하지 않음)
 
 2026-11-16에 [팀 21 FE `dev` 브랜치](https://github.com/2026Ganzi-Thon/2026_GANZITHON_TEAM_21_FE/tree/dev)를 확인했다. 아래는 현재 BE `/api/v1` 계약 기준이다. FE 저장소 코드는 이번 BE 브랜치에서 변경하지 않았다.
 

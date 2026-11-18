@@ -30,6 +30,7 @@ public class AsmrStorage {
         } finally { Files.deleteIfExists(temporary); }
     }
     public byte[] read(String key) throws IOException {return Files.readAllBytes(path(key));}
+    public boolean exists(String key) { return Files.isRegularFile(path(key)); }
     private Path path(String key){
         Path result=root.resolve(key).normalize();
         if(!result.startsWith(root)) throw new IllegalArgumentException("Invalid storage key");

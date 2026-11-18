@@ -36,12 +36,14 @@ public class AsmrService {
                 ()->createNew(actor,orb,input));
     }
     private Generation createNew(UUID actor,UUID orb,GenerateRequest input){
+        lockOrb(actor,orb);
+        if(Boolean.TRUE.equals(jdbc.queryForObject("SELECT EXISTS(SELECT 1 FROM orb_color_snapshot WHERE orb_id=?)",Boolean.class,orb)))
+            throw new ApiException(HttpStatus.CONFLICT,"ACTION_NOT_ALLOWED","MVP orbs do not use AI generation");
         if(!provider.available()) throw new ApiException(HttpStatus.SERVICE_UNAVAILABLE,
                 "GENERATION_UNAVAILABLE","ASMR 생성 공급자가 아직 연결되지 않았습니다.");
         String description=input==null?null:input.description();
         if(description!=null && description.codePointCount(0,description.length())>300)
             throw ApiException.invalid("description은 300자 이하여야 합니다.");
-        lockOrb(actor,orb);
         if(dispatched(orb)) throw conflict("ALREADY_DISPATCHED");
         if(jdbc.queryForObject("SELECT COUNT(*) FROM asmr_generation WHERE orb_id=?",Integer.class,orb)>0)
             throw conflict("GENERATION_EXISTS");

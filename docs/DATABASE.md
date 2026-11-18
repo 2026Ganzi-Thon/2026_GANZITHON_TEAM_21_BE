@@ -1,3 +1,36 @@
+# EmOri DATABASE v0.5 — 최신 전달 반영 설계 검토안
+
+> **v0.5 설계 및 8단계 구현 · 2026-11-18.** 색상 스냅샷과 사전 음원 카탈로그는 V7에 반영했다. 생년월일·복수 친구 전송은 합의 전 제안이다. 아래 V1~V6 대조본은 기존 스키마의 참고 자료다.
+
+> **MVP 음원 정책 확정 · 2026-11-18.** 팀이 미리 준비한 무가사 음원 중 최대 1곡(15초 이하)을 구슬에 선택적으로 첨부한다. 신규 구슬은 생성 대기 없이 전송할 수 있고, AI 생성·재시도는 MVP 범위에서 제외한다. 기존 AI 음원은 이미 저장된 기록에서 계속 재생할 수 있도록 보존한다.
+
+**8단계 구현 상태:** Flyway `V7__color_snapshots_and_sound_catalog.sql`에서 `orb_color_snapshot`, `sound_catalog`, nullable `orb.sound_id`를 추가했다. `orb_emotion`에는 선택 색의 첫 단어와 케어 여부를 저장해 기존 대표 색·날짜 집계 경로를 재사용한다. 네 단어와 영역은 새 스냅샷에 선택 순서대로 보존한다. 이전 AI 테이블과 파일은 유지한다. PostgreSQL 18에서 신규 설치·Stage 8 HTTP 흐름, V6 데이터가 있는 DB의 V7 업그레이드·기존 AI 트랙 조회를 검증했다.
+
+## 변경 설계 제안 (PostgreSQL)
+
+아래는 추가 설계다. 저장소에는 Flyway V1~V6이 있으며, 운영 DB 적용 상태는 확인하지 않았다. 구현 전에 실제 스키마의 컬럼명·제약을 대조해 신규 Flyway 마이그레이션으로 추가한다. 기존 마이그레이션 수정 금지.
+
+| 대상 | 제안 컬럼·제약 | 설명 |
+|---|---|---|
+| app_user | `birth_date DATE NULL` 기본 NULL | 기존 계정 유지. 미래 날짜 거절은 KST 기준 서비스 검증. 서버가 성인 여부 계산; 자기신고이며 인증 증빙 아님. 접근·보존기간·변경정책 확인 |
+| emotion_catalog | 기존 색·영역·단어 매핑 및 버전 | 유효한 색별 단어 4개, 명세 표와 대조. 고유 제약은 실제 기존 스키마 확인 |
+| orb_emotion | 기존 선택 스냅샷을 확장해 색별 area와 단어 4개를 보존 | 정규화된 자식행 또는 JSONB를 실제 스키마에 맞게 선택. 구슬당 1~2개 서로 다른 색, 전송 후 불변. 사용자별 삭제가 콘텐츠를 삭제하지 않음 |
+| sound_catalog (신규) | `id UUID PK`, `title TEXT NOT NULL`, `color VARCHAR NULL`, `duration_ms INTEGER NOT NULL CHECK (duration_ms BETWEEN 1 AND 15000)`, `storage_key TEXT NOT NULL UNIQUE`, `active BOOLEAN NOT NULL DEFAULT true`, `created_at TIMESTAMPTZ NOT NULL DEFAULT now()` | 제공 샘플 메타데이터. object key만 저장, URL은 접근 정책에 따라 생성. 유효 색 검증과 저장소 이용권한 확인 |
+| orb | `sound_id UUID NULL REFERENCES sound_catalog(id) ON DELETE RESTRICT` | 샘플이 선택된 경우 하나만 연결. 카탈로그 비활성화해도 기존 구슬 재생 유지. 실제 orb 스키마에 맞춰 명명 |
+| dispatch/receipt | 기존 전송 1건과 수신자별 receipt N건 | 친구 다중 전송 확장 제안. 수신 대상 유일성 `(dispatch_id, recipient_id)` 검토. 수신자별 열람·취소 직렬화 유지 |
+
+친구 복수 허용 시 실제 `receipt` 제약과 서비스의 단일 수신자 가정부터 확인한다. 최대 인원·전체 실패/부분 성공이 미정이므로 경합 및 오류 규칙을 임의 확정하지 않는다. 열람/취소는 같은 대상 행을 `SELECT ... FOR UPDATE`로 잠그고 상태·5분을 잠금 안에서 재검증한다. 멱등성은 기존 사용자·메서드·경로·키 유일 제약 및 요청 해시를 유지한다. 익명 일일 한도 KST와 카운터 잠금은 기존 설계를 유지한다.
+
+`birth_date`는 새 nullable 컬럼으로 추가 후 기존 사용자 UNKNOWN 유지. 과거 단어 선택 기록과 ASMR 작업·트랙·파일은 삭제하거나 샘플로 변환하지 않는다. 기존 데이터와 신규 색 매핑의 표현·케어 집계는 버전별로 분리하고 기획의 소급 적용 여부를 확인한다. 기존 AI 관련 테이블과 파일 경로를 유지하는 추가 마이그레이션으로 진행한다.
+
+새 MVP 구슬에는 선택 시 `orb.sound_id` 하나만 설정한다. 과거 AI 구슬은 기존 플레이리스트 관계에서 읽는다. 첨부 시 활성 상태와 실제 재생 시간을 검증하고, 파일을 바꿀 때는 새 카탈로그 ID와 저장 키를 발급해 과거 구슬의 재생을 보존한다. 카탈로그 행과 파일은 배포 시 함께 준비한다.
+
+운영 PostgreSQL 기준 `UUID`, `TIMESTAMPTZ`, `JSONB`, 부분 인덱스·행 잠금은 H2와 동작이 다를 수 있다. 신규 마이그레이션 및 열람/취소·멱등·한도 경합은 실제 PostgreSQL에서 검증한다.
+
+**저장소 반영 메모:** 위 제안 중 색상 스냅샷과 음원 카탈로그는 V7에 적용했다. 생년월일과 복수 친구 전송은 미구현 제안이다. 아래 구현 대조본은 V1~V6을 설명한다.
+
+## 이전 구현 대조본 — 변경된 항목은 위 검토안 우선
+
 # EmOri 데이터베이스 설계
 
 **구현 대조본 0.2 · 2026-11-16 · 기준 PRD/API v0.3, Flyway V1~V6**

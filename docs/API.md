@@ -1,3 +1,45 @@
+# EmOri API v0.5 — FE 연동 검토안
+
+> **v0.5 계약 및 8단계 구현 · 2026-11-18.** 아래 확정 범위는 서버에 반영했다. 친구 복수 전송·생년월일 API는 합의 전 제안이다. 아래 v0.3 원문은 과거 참고다.
+
+> **MVP 음원 정책 확정 · 2026-11-18.** 팀이 미리 준비한 무가사 음원 중 최대 1곡(15초 이하)을 구슬에 선택적으로 첨부한다. 신규 구슬은 생성 대기 없이 전송할 수 있고, AI 생성·재시도는 MVP 범위에서 제외한다. 기존 AI 음원은 이미 저장된 기록에서 계속 재생할 수 있도록 보존한다.
+
+**8단계 구현 상태:** `POST /orbs`의 `colors`·선택적 `soundId`, `GET /catalog/sounds`, 인증된 샘플 미리듣기와 구슬별 재생은 구현됐다. `emotionIds` 입력은 과거 클라이언트 호환용으로 유지한다. 친구 복수 전송과 생년월일 API는 아직 제공하지 않는다. 상세 JSON과 인증 헤더는 [FE 연동 인계](FE_INTEGRATION.md)를 참조한다.
+
+## 변경 계약안
+
+공통 `/api/v1`, Bearer, 오류·페이지·멱등키 규칙은 아래 v0.3을 따른다. ★ 요청은 사용자 동작마다 UUID를 만들고 **동일 요청의 재시도에는 같은 키**를 사용한다. 다른 payload로 재사용하면 409. 표에서 생년월일·복수 친구 전송은 미구현 제안이다.
+
+| API | 요청 | 응답 / 조건 |
+|---|---|---|
+| POST /auth/signup | `{loginId,password,nickname?,birthDate}` | 기존 `{user,session}`. nickname 생략 시 loginId; 생년월일은 YYYY-MM-DD 자기신고. 가입 필수 여부는 최신 전달 기준 제안 |
+| PUT /me/birth-date | `{birthDate:"2001-05-19"}` | `Me` 반환 제안. 기존 미입력 사용자용. 수정 가능 여부·범위 미결정 |
+| GET /catalog/sounds | — | `{items:[{id,title,color,durationMs,playbackUrl}]}`. color는 null 허용. 0 < durationMs <= 15000. 파일이 있는 활성 샘플만 반환 |
+| ★ POST /orbs | `{colors:["BLUE","PURPLE"],soundId:null}` | 201 `{orb:Orb,recordId:null}`. 색 1~2개·중복 거절. soundId 생략/null이면 음원 없음, 미등록·비활성 ID는 422 INVALID_INPUT |
+| ★ POST /orbs/{orbId}/dispatches | `{route:"FRIEND",friendId:"id"}` | 단일 친구 전송 유지. `friendIds` 복수 전송은 합의 전 미구현 |
+| GET /inbox | `cursor?,limit?` | 항목에 `orb` 포함. 익명 sender null |
+| GET /records | `cursor?,limit?,side?` | 각 항목에 `counterpart:{id,nickname}|null`. 익명·다중 대상은 null, 개인 정보 노출 금지 |
+
+`Emotion={color,area,words:[string]}`으로 색마다 4개 자동 매핑한다. 기존 개별 단어 ID 선택 계약과 호환되지 않는다. `adultStatus=VERIFIED_19_PLUS`는 실제 인증으로 오해될 수 있으므로 **기존 enum 의미를 바꾸지 않는다**. 자기신고 상태의 새 enum과 경계는 팀 합의가 필요하다. 기존 UNKNOWN은 익명 비활성이다.
+
+### MVP 음원 계약
+
+- 생성 요청 예시: `{"colors":["BLUE","PURPLE"],"soundId":"sample-id"}`. 구슬은 즉시 초안으로 반환하며 전송 시 음원 생성 상태를 기다리지 않는다.
+- 기존 `Orb.playlist`에 `{id,status:"READY",tracks:[{id,order:1,title,durationMs,playbackUrl}]}`를 반환한다. 카탈로그 ID는 `soundId`에 사용한다. 음원 없는 구슬의 `playlist`는 null이다. 과거 AI 플레이리스트는 저장된 형식으로 읽는다.
+- 신규 색상 구슬에 AI 생성 요청을 보내면 409 `ACTION_NOT_ALLOWED`를 반환한다. 카탈로그에는 파일이 있는 활성 샘플만 나오고, 기존에 첨부된 비활성 샘플은 해당 구슬 접근 권한이 있는 사용자에게 계속 재생된다. 미리듣기와 구슬 재생은 Bearer 인증이 필요하다.
+
+### 전송·취소의 미결정 충돌
+
+기존 `POST /dispatches/{dispatchId}/targets/{targetId}/cancel`과 FE `POST /dispatches/{id}/cancel`은 동등하지 않다. 대상별 취소를 보존하는 안을 우선 제안한다. 전체 취소 엔드포인트는 일부 열람·만료·이미 취소된 대상의 결과 의미가 합의되기 전 구현 계약으로 확정하지 않는다. 복수 친구 전송의 대상 유효성, 원자성, 중복 ID, 최대 수, 실패 응답도 팀 합의가 필요하다.
+
+### 나머지 호환 확인
+
+FE mock과 v0.3의 `open/replay`, `finish`, 받은 기록 삭제, 신고 본문·상태코드 및 페이지 반복 조회는 구현 대조가 필요하다. 조용히 듣기는 익명 수신에만 허용하는 기존 정책을 따른다.
+
+**저장소 반영 메모:** 위 v0.5의 확정 범위를 8단계에 구현했다. 위 표의 친구 복수 전송·생년월일은 미구현 제안이다. 아래 v0.3은 과거 계약 참고 자료다.
+
+## 이전 v0.3 원문 — 변경된 항목은 위 검토안 우선
+
 # EmOri API 명세서
 
 **계약 v0.3 · 2026-11-15 · 기본 경로 /api/v1**  

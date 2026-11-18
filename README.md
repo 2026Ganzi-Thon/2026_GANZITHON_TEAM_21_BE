@@ -2,6 +2,8 @@
 
 Java 21, Spring Boot 4.1.2, Gradle 9.8.2. API 계약은 [docs/API.md](docs/API.md), 정책은 [docs/PRD.md](docs/PRD.md), DB 설계는 [docs/DATABASE.md](docs/DATABASE.md)를 참조하세요.
 
+8단계 서버는 색 1~2개 선택, 색별 단어 4개 스냅샷, 사전 제작한 15초 이하 무가사 음원 최대 1곡의 선택적 첨부와 재생을 지원합니다. 기존 AI 구슬은 보존합니다. 생년월일 자기신고와 복수 친구 전송은 미합의로 보류했습니다. 요청·응답과 음원 등록 방법은 [FE 연동 인계](docs/FE_INTEGRATION.md)를 참조하세요.
+
 ## 로컬 실행
 
 기본 실행은 `./gradlew.bat bootRun`입니다. 기본 DB는 `./data/emori`에 생성되는 H2 파일이며, `data/`는 Git에서 제외합니다. API 기본 주소는 `http://localhost:8080/api/v1`입니다. `./gradlew.bat test`로 테스트를 실행합니다.
