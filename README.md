@@ -1,5 +1,7 @@
 # EmOri backend
 
+EC2 첫 수동 배포는 [docs/EC2_FIRST_DEPLOY.md](docs/EC2_FIRST_DEPLOY.md)를 참조하세요. `Dockerfile`과 `compose.yaml`은 앱·PostgreSQL·Caddy를 실행합니다.
+
 Java 21, Spring Boot 4.1.2, Gradle 9.8.2. API 계약은 [docs/API.md](docs/API.md), 정책은 [docs/PRD.md](docs/PRD.md), DB 설계는 [docs/DATABASE.md](docs/DATABASE.md)를 참조하세요.
 
 8단계 서버는 색 1~2개 선택, 색별 단어 4개 스냅샷, 사전 제작한 15초 이하 무가사 음원 최대 1곡의 선택적 첨부와 재생을 지원합니다. 기존 AI 구슬은 보존합니다. 생년월일 자기신고와 복수 친구 전송은 미합의로 보류했습니다. 요청·응답과 음원 등록 방법은 [FE 연동 인계](docs/FE_INTEGRATION.md)를 참조하세요.
@@ -10,9 +12,9 @@ Java 21, Spring Boot 4.1.2, Gradle 9.8.2. API 계약은 [docs/API.md](docs/API.m
 
 서버가 실행 중일 때 `powershell.exe -NoProfile -ExecutionPolicy Bypass -File scripts/smoke-auth.ps1`로 두 계정의 실제 HTTP 인증 흐름을 확인할 수 있습니다. 다른 포트라면 `-BaseUrl http://127.0.0.1:18081/api/v1`을 전달하세요. 테스트는 새 임의 계정을 생성하며 토큰을 출력하지 않습니다.
 
-PostgreSQL을 사용할 때는 PostgreSQL 서버를 먼저 실행하고 환경변수를 설정한 뒤 `./gradlew.bat bootRun --args='--spring.profiles.active=postgres'`를 실행하세요. Docker 이미지를 만들거나 서버에 배포하는 설정은 아직 없습니다.
+PostgreSQL을 사용할 때는 PostgreSQL 서버를 먼저 실행하고 환경변수를 설정한 뒤 `./gradlew.bat bootRun --args='--spring.profiles.active=postgres'`를 실행하세요. EC2 Compose 배포에서는 이 프로필과 내부 DB 서비스 이름을 자동으로 사용합니다.
 
-테스트용 PostgreSQL은 Docker 엔진이 실행된 환경에서 예를 들어 `docker run --rm --name emori-postgres -e POSTGRES_DB=emori -e POSTGRES_USER=emori -e POSTGRES_PASSWORD=$env:DB_PASSWORD -p 5432:5432 postgres:18`로 실행할 수 있습니다. 다른 터미널에서 `DB_URL=jdbc:postgresql://localhost:5432/emori`, `DB_USERNAME=emori`, `DB_PASSWORD`를 환경변수로 설정하고 postgres 프로필로 서버를 실행한 뒤 위 HTTP 검증 스크립트를 사용하세요. 이 명령은 테스트 DB용이며 실제 PostgreSQL 검증은 Docker 엔진과 이미지를 사용할 수 있을 때 수행해야 합니다.
+테스트용 PostgreSQL은 Docker 엔진이 실행된 환경에서 예를 들어 `docker run --rm --name emori-postgres -e POSTGRES_DB=emori -e POSTGRES_USER=emori -e POSTGRES_PASSWORD=$env:DB_PASSWORD -p 5432:5432 postgres:18`로 실행할 수 있습니다. 다른 터미널에서 `DB_URL=jdbc:postgresql://localhost:5432/emori`, `DB_USERNAME=emori`, `DB_PASSWORD`를 환경변수로 설정하고 postgres 프로필로 서버를 실행한 뒤 위 HTTP 검증 스크립트를 사용하세요. 이 명령은 개발용이며 EC2 배포는 Compose의 내부 DB 네트워크를 사용합니다.
 
 | 환경변수 | PostgreSQL 프로필에서의 용도 | 기본값 |
 |---|---|---|
