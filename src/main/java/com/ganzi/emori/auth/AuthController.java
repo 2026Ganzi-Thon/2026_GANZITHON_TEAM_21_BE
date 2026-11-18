@@ -45,4 +45,9 @@ public class AuthController {
     public Me profile(HttpServletRequest servlet, @RequestBody ProfileRequest request) {
         return auth.updateProfile((UUID) servlet.getAttribute("userId"), request);
     }
+
+    @PutMapping("/me/birth-date")
+    public Me birthDate(HttpServletRequest servlet, @RequestBody BirthDateRequest request) {
+        return auth.updateBirthDate((UUID) servlet.getAttribute("userId"), request);
+    }
 }

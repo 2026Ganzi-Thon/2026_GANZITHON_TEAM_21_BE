@@ -1,0 +1,4 @@
+api.gaebalmani.shop {
+    encode gzip
+    reverse_proxy app:8080
+}

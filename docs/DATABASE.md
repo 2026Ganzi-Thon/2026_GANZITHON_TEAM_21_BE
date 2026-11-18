@@ -1,10 +1,48 @@
+# EmOri DATABASE v0.5 — 최신 전달 반영 설계 검토안
+
+## V8 생년월일 자기신고
+
+`V8__birth_date_self_report.sql`은 `app_user.birth_date DATE NULL`을 추가하고 성인 상태 CHECK에 `SELF_REPORTED_19_PLUS`, `SELF_REPORTED_UNDER_19`를 더한다. 기존 사용자 값과 `VERIFIED_19_PLUS` 의미는 유지한다. 한국 시간 기준 생일·2월 29일 규칙은 서비스에서 계산한다. 음원 7곡은 Flyway seed가 아니라 운영자 등록 명령으로 영속 음원 볼륨과 `sound_catalog`에 저장된다.
+
+
+> **v0.5 설계 및 8단계 구현 · 2026-11-18.** 색상 스냅샷과 사전 음원 카탈로그는 V7에 반영했다. 생년월일·복수 친구 전송은 합의 전 제안이다. 아래 V1~V6 대조본은 기존 스키마의 참고 자료다.
+
+> **MVP 음원 정책 확정 · 2026-11-18.** 팀이 미리 준비한 무가사 음원 중 최대 1곡(15초 이하)을 구슬에 선택적으로 첨부한다. 신규 구슬은 생성 대기 없이 전송할 수 있고, AI 생성·재시도는 MVP 범위에서 제외한다. 기존 AI 음원은 이미 저장된 기록에서 계속 재생할 수 있도록 보존한다.
+
+**8단계 구현 상태:** Flyway `V7__color_snapshots_and_sound_catalog.sql`에서 `orb_color_snapshot`, `sound_catalog`, nullable `orb.sound_id`를 추가했다. `orb_emotion`에는 선택 색의 첫 단어와 케어 여부를 저장해 기존 대표 색·날짜 집계 경로를 재사용한다. 네 단어와 영역은 새 스냅샷에 선택 순서대로 보존한다. 이전 AI 테이블과 파일은 유지한다. PostgreSQL 18에서 신규 설치·Stage 8 HTTP 흐름, V6 데이터가 있는 DB의 V7 업그레이드·기존 AI 트랙 조회를 검증했다.
+
+## 변경 설계 제안 (PostgreSQL)
+
+아래는 추가 설계다. 저장소에는 Flyway V1~V6이 있으며, 운영 DB 적용 상태는 확인하지 않았다. 구현 전에 실제 스키마의 컬럼명·제약을 대조해 신규 Flyway 마이그레이션으로 추가한다. 기존 마이그레이션 수정 금지.
+
+| 대상 | 제안 컬럼·제약 | 설명 |
+|---|---|---|
+| app_user | `birth_date DATE NULL` 기본 NULL | 기존 계정 유지. 미래 날짜 거절은 KST 기준 서비스 검증. 서버가 성인 여부 계산; 자기신고이며 인증 증빙 아님. 접근·보존기간·변경정책 확인 |
+| emotion_catalog | 기존 색·영역·단어 매핑 및 버전 | 유효한 색별 단어 4개, 명세 표와 대조. 고유 제약은 실제 기존 스키마 확인 |
+| orb_emotion | 기존 선택 스냅샷을 확장해 색별 area와 단어 4개를 보존 | 정규화된 자식행 또는 JSONB를 실제 스키마에 맞게 선택. 구슬당 1~2개 서로 다른 색, 전송 후 불변. 사용자별 삭제가 콘텐츠를 삭제하지 않음 |
+| sound_catalog (신규) | `id UUID PK`, `title TEXT NOT NULL`, `color VARCHAR NULL`, `duration_ms INTEGER NOT NULL CHECK (duration_ms BETWEEN 1 AND 15000)`, `storage_key TEXT NOT NULL UNIQUE`, `active BOOLEAN NOT NULL DEFAULT true`, `created_at TIMESTAMPTZ NOT NULL DEFAULT now()` | 제공 샘플 메타데이터. object key만 저장, URL은 접근 정책에 따라 생성. 유효 색 검증과 저장소 이용권한 확인 |
+| orb | `sound_id UUID NULL REFERENCES sound_catalog(id) ON DELETE RESTRICT` | 샘플이 선택된 경우 하나만 연결. 카탈로그 비활성화해도 기존 구슬 재생 유지. 실제 orb 스키마에 맞춰 명명 |
+| dispatch/receipt | 기존 전송 1건과 수신자별 receipt N건 | 친구 다중 전송 확장 제안. 수신 대상 유일성 `(dispatch_id, recipient_id)` 검토. 수신자별 열람·취소 직렬화 유지 |
+
+친구 복수 허용 시 실제 `receipt` 제약과 서비스의 단일 수신자 가정부터 확인한다. 최대 인원·전체 실패/부분 성공이 미정이므로 경합 및 오류 규칙을 임의 확정하지 않는다. 열람/취소는 같은 대상 행을 `SELECT ... FOR UPDATE`로 잠그고 상태·5분을 잠금 안에서 재검증한다. 멱등성은 기존 사용자·메서드·경로·키 유일 제약 및 요청 해시를 유지한다. 익명 일일 한도 KST와 카운터 잠금은 기존 설계를 유지한다.
+
+`birth_date`는 새 nullable 컬럼으로 추가 후 기존 사용자 UNKNOWN 유지. 과거 단어 선택 기록과 ASMR 작업·트랙·파일은 삭제하거나 샘플로 변환하지 않는다. 기존 데이터와 신규 색 매핑의 표현·케어 집계는 버전별로 분리하고 기획의 소급 적용 여부를 확인한다. 기존 AI 관련 테이블과 파일 경로를 유지하는 추가 마이그레이션으로 진행한다.
+
+새 MVP 구슬에는 선택 시 `orb.sound_id` 하나만 설정한다. 과거 AI 구슬은 기존 플레이리스트 관계에서 읽는다. 첨부 시 활성 상태와 실제 재생 시간을 검증하고, 파일을 바꿀 때는 새 카탈로그 ID와 저장 키를 발급해 과거 구슬의 재생을 보존한다. 카탈로그 행과 파일은 배포 시 함께 준비한다.
+
+운영 PostgreSQL 기준 `UUID`, `TIMESTAMPTZ`, `JSONB`, 부분 인덱스·행 잠금은 H2와 동작이 다를 수 있다. 신규 마이그레이션 및 열람/취소·멱등·한도 경합은 실제 PostgreSQL에서 검증한다.
+
+**저장소 반영 메모:** 위 제안 중 색상 스냅샷과 음원 카탈로그는 V7에 적용했다. 생년월일과 복수 친구 전송은 미구현 제안이다. 아래 구현 대조본은 V1~V6을 설명한다.
+
+## 이전 구현 대조본 — 변경된 항목은 위 검토안 우선
+
 # EmOri 데이터베이스 설계
 
-**설계 검토본 0.1 · 2026-11-16 · 기준 PRD/API v0.3**
+**구현 대조본 0.2 · 2026-11-16 · 기준 PRD/API v0.3, Flyway V1~V6**
 
-정책 문서는 [PRD.md](PRD.md), 외부 계약은 [API.md](API.md)다. 사용자 Windows 프로젝트에는 직접 접근할 수 없어 CLI가 프로젝트 루트에 배치할 `docs/` 묶음으로 작성했다. 현재 접근 가능한 과거 GitHub 체크아웃은 설계 근거에서 제외했다. 사용자가 보고한 로컬 Spring Boot 골격을 전제로 하며 실제 로컬 의존성·현재 파일 구조는 CLI가 구현 전에 확인한다.
+정책 문서는 [PRD.md](PRD.md), 외부 계약은 [API.md](API.md)다. 이 문서는 현재 Spring Boot 구현 및 Flyway V1~V6과 대조했다. 공급자·운영 저장소 결정은 [ASMR_PROVIDER.md](ASMR_PROVIDER.md)에 정리했다.
 
-이번 결과물은 설계 문서다. SQL 마이그레이션·Java 코드·DB 적용은 설계 승인 후 진행한다. 아래 내부 모델·잠금 방식·토큰 방식은 설계 제안이며 외부 v0.3 계약을 보존한다.
+아래 내부 모델과 잠금 방식에는 구현된 부분과 후속 제안이 함께 있다. 실제 적용 여부는 각 버전 마이그레이션과 검증 기록을 기준으로 확인한다.
 
 ## 1. 중요한 설계 선택
 
@@ -73,7 +111,7 @@ erDiagram
   app_user ||--o{ device_registration : installs
 ```
 
-추가 내부 관계는 app_user → anonymous_block, anon_daily_usage, idempotency_request, outbox_event다. 카탈로그 테이블 emotion_catalog·reaction_catalog는 버전별 참조를 제공한다. 각 영역의 테이블 목록은 §4의 24개 테이블이다.
+추가 내부 관계는 app_user → anonymous_block, anon_daily_usage, idempotency_request, outbox_event와 asmr_generation → asmr_track → asmr_outbox_event다. 카탈로그 테이블 emotion_catalog·reaction_catalog는 버전별 참조를 제공한다. V1~V6에는 총 27개 테이블이 있다.
 
 ## 3. 공통 타입·제약 표기
 
@@ -277,6 +315,10 @@ U(orb_id), CHECK track_count=3와 상태 목록. 설명은 전송 후에도 작�
 공통 컬럼 · created_at, updated_at
 
 U(generation_id,position), U(provider,provider_job_id), U(provider,provider_request_key). CHECK position 1~3, attempt>=1, 상태 QUEUED/PROCESSING/FAILED/READY. READY면 title·storage_key·duration_ms NOT NULL, duration_ms BETWEEN 1 AND 30000, error_code NULL. 미완료는 결과 필드 NULL, FAILED에는 error_code 필수. I(status,attempt_deadline_at). 공급자별 부분 결과는 provider_job_id로 복구하며 실제 bytes 길이·무보컬 품질은 공급자/서비스 검증 대상이다.
+
+### asmr_outbox_event
+
+V6은 기존 V5 푸시 outbox의 CHECK를 변경하지 않고 ASMR 전용 작업 큐를 추가한다. `id` PK, `track_id` FK, `attempt`, `status`, `available_at`, `lease_token`, `lease_until`, `created_at`, `updated_at`을 저장한다. U(track_id,attempt), I(status,available_at,id), I(status,lease_until). 상태는 PENDING/PROCESSING/SENT/FAILED이며 PROCESSING에서만 lease 값이 존재한다. 공급자 작업 ID와 10분 기한은 `asmr_track`에 보존한다.
 
 ### dispatch
 
@@ -484,17 +526,15 @@ U(user_id,method,resource_path,request_key), I(expires_at). SUCCEEDED는 결과�
 
 ### outbox_event
 
-푸시·ASMR 트랙 외부 작업의 커밋 후 전달과 lease 복구.
+푸시 알림의 커밋 후 전달과 lease 복구. V5 구조는 푸시 전용이며 ASMR 작업은 V6의 `asmr_outbox_event`를 사용한다.
 
 | 컬럼 | PostgreSQL 타입 | NULL | 기본값 | 의미·FK |
 |---|---|---|---|---|
 | id | uuid | N | 없음 | PK |
-| type | varchar(16) | N | 없음 | PUSH_RECEIPT / ASMR_TRACK |
+| type | varchar(16) | N | 없음 | PUSH_RECEIPT |
 | receipt_id | uuid | Y | NULL | FK receipt.id |
 | installation_id | uuid | Y | NULL | 설치 참조값, FK 없음 |
 | user_id | uuid | N | 없음 | FK app_user.id, 작업 귀속 계정 |
-| track_id | uuid | Y | NULL | FK asmr_track.id |
-| track_attempt | integer | Y | NULL |  |
 | status | varchar(12) | N | 'PENDING' | PENDING / PROCESSING / SENT / SKIPPED / FAILED |
 | attempt_count | integer | N | 0 |  |
 | available_at | timestamptz(6) | N | now() |  |
@@ -505,7 +545,7 @@ U(user_id,method,resource_path,request_key), I(expires_at). SUCCEEDED는 결과�
 
 공통 컬럼 · created_at, updated_at
 
-CHECK PUSH면 receipt·installation 필수·track 필드 NULL, ASMR이면 track·track_attempt 필수·receipt/installation NULL. 부분 U(receipt_id,installation_id) WHERE type='PUSH_RECEIPT', 부분 U(track_id,track_attempt) WHERE type='ASMR_TRACK'. I(status,available_at,id), I(status,lease_until). 설치에 FK를 두지 않아 로그아웃 DELETE를 방해하지 않고 워커가 현재 등록 소유권을 재검사한다. 이벤트 payload로 토큰·감정 원문을 복제하지 않는다.
+CHECK type='PUSH_RECEIPT'. U(receipt_id,installation_id). I(status,available_at,id), I(status,lease_until). 설치에 FK를 두지 않아 로그아웃 DELETE를 방해하지 않고 워커가 현재 등록 소유권을 재검사한다. 이벤트 payload로 토큰·감정 원문을 복제하지 않는다.
 
 ## 5. API에서 테이블로 연결
 
@@ -515,7 +555,7 @@ CHECK PUSH면 receipt·installation 필수·track 필드 NULL, ASMR이면 track�
 | 로그인·refresh·logout | auth_session | 평문 토큰은 응답 때만. JWT 구현 변경은 외부 계약 유지 시 검토 가능 |
 | 친구 요청·수락·삭제 | friend_request, friendship | 수락 상태와 현재 관계 별도 |
 | 감정 카탈로그·초안 | emotion_catalog, orb, orb_emotion | 각 선택 단어당 Emotion 한 개 |
-| ASMR 생성·retry·첨부 해제 | asmr_generation, asmr_track, outbox_event | Generation·Playlist는 같은 생성 id, 필요한 필드만 분리 투영 |
+| ASMR 생성·retry·첨부 해제 | asmr_generation, asmr_track, asmr_outbox_event | Generation·Playlist는 같은 생성 id, 필요한 필드만 분리 투영 |
 | 전달 확정 | dispatch, receipt, emotion_record, anon_daily_usage, outbox_event | Record.id는 전송 성공 때 생성. 초안 recordId는 null |
 | 수신함·열람·취소 | receipt, dispatch | targetId는 receipt.target_id, 수신자 id는 receipt.id |
 | 반응·finish | receipt, receipt_reaction | action_token 상태는 receipt가 원천 |
@@ -609,17 +649,17 @@ PK·FK·UNIQUE·부분 고유 인덱스·행 단위 CHECK는 §4와 같다. 모�
 
 ### 접수와 재시도
 
-생성 요청은 orb 잠금 후 작성자·미전송·기존 생성 없음 확인, generation QUEUED·트랙 3개 QUEUED·트랙별 ASMR_TRACK outbox를 만든다. 202와 작업 URL을 커밋한 후 외부 호출한다. 원 요청 중 공급자 완료를 기다리지 않는다.
+생성 요청은 orb 잠금 후 작성자·미전송·기존 생성 없음 확인, generation QUEUED·트랙 3개 QUEUED·트랙별 `asmr_outbox_event`를 만든다. 202와 작업 URL을 커밋한 후 외부 호출한다. 원 요청 중 공급자 완료를 기다리지 않는다.
 
-워커는 due outbox를 SELECT FOR UPDATE SKIP LOCKED로 소량 claim하고 PROCESSING·lease_token·lease_until·attempt_count를 저장한 뒤 커밋한다. 공급자 호출에는 안정된 `(track_id,attempt)` 요청 키를 사용한다. 외부 작업 ID가 생기면 짧은 트랜잭션으로 저장한다. 공급자 작업이 비동기로 계속 실행 중이면 provider_job_id를 보존하고 이벤트를 PENDING·다음 조회 available_at으로 돌려 polling한다. 이때 lease_token/lease_until은 NULL로 해제한다. 트랙 종료를 확정했을 때만 이벤트를 SENT 또는 FAILED로 닫는다. 워커가 죽으면 lease 만료 후 같은 attempt의 외부 작업 상태를 먼저 조회한다. 이전 lease_token의 늦은 워커는 완료 UPDATE를 할 수 없다. SKIP LOCKED는 작업 큐 분배에만 사용한다. [S4]
+워커는 due `asmr_outbox_event`를 SELECT FOR UPDATE SKIP LOCKED로 소량 claim하고 PROCESSING·lease_token·lease_until을 저장한 뒤 커밋한다. 공급자 호출에는 안정된 `(track_id,attempt)` 요청 키를 사용한다. 외부 작업 ID가 생기면 짧은 트랜잭션으로 저장한다. 공급자 작업이 비동기로 계속 실행 중이면 provider_job_id를 보존하고 이벤트를 PENDING·다음 조회 available_at으로 돌려 polling한다. 이때 lease_token/lease_until은 NULL로 해제한다. 트랙 종료를 확정했을 때만 이벤트를 SENT 또는 FAILED로 닫는다. 워커가 죽으면 lease 만료 후 같은 attempt의 외부 작업 상태를 먼저 조회한다. 이전 lease_token의 늦은 워커는 완료 UPDATE를 할 수 없다. SKIP LOCKED는 작업 큐 분배에만 사용한다. [S4]
 
-트랙 완료 처리에서는 orb→generation→track을 잠그고 현재 attempt·lease를 확인한다. 생성 공급자 결과를 안정된 storage_key로 저장하고 duration 1~30000 검증 후 READY로 확정한다. 동일 완료 콜백은 같은 값으로 종료한다. 실패면 FAILED·error_code, 남은 실행 건이 있으면 generation PROCESSING, 끝나면 READY/PARTIAL_FAILED/FAILED로 계산한다.
+트랙 완료 처리에서는 큐 lease 행을 먼저 잠근 뒤 orb→generation→track을 잠그고 현재 attempt·lease를 확인한다. PCM WAV 헤더와 실제 데이터 길이에서 계산한 duration이 공급자 신고값과 일치하고 1~30000ms일 때만 READY로 확정한다. 저장 키에는 attempt와 lease를 포함해 늦은 워커가 성공한 파일을 덮어쓰지 못하게 한다. 동일 완료 콜백은 최종 상태를 다시 변경하지 않는다. 실패면 FAILED·error_code, 남은 실행 건이 있으면 generation PROCESSING, 끝나면 READY/PARTIAL_FAILED/FAILED로 계산한다.
 
 사용자 retry는 실패 트랙에만 attempt+1, QUEUED, provider 식별값·오류·결과 NULL, 새 attempt용 outbox를 만든다. 성공 트랙 ID·파일·순서는 보존한다. 같은 작업의 서로 다른 멱등키 retry가 경쟁하면 먼저 시작한 쪽 이후는 GENERATION_IN_PROGRESS다. 이전 attempt의 콜백은 무시하고 외부 유휴 파일은 정리 후보로 남긴다.
 
 ### 파일 저장과 원자성의 한계
 
-DB와 파일 저장소는 하나의 트랜잭션이 아니다. `generation/track/attempt` 기반 객체 키로 업로드하고 메타데이터 커밋 후 참조한다. 업로드만 성공한 파일은 orphan 정리 대상으로 식별하되, 보관기간이 정해지기 전 자동 일괄 삭제를 구현하지 않는다. 파일 바이트·만료 playbackUrl·사용자 설명을 수신 사본마다 복사하지 않는다. 스트리밍/서명 URL을 발급할 때마다 본인 초안 또는 유효한 수신 권한을 확인한다.
+DB와 파일 저장소는 하나의 트랜잭션이 아니다. `generation/track/attempt-lease` 기반 파일 키로 저장하고 메타데이터 커밋 후 참조한다. 파일 저장만 성공한 결과는 orphan 정리 대상으로 식별하되, 보관기간이 정해지기 전 자동 일괄 삭제를 구현하지 않는다. 파일 바이트·사용자 설명을 수신 사본마다 복사하지 않는다. 현재 playbackUrl은 서버 인증 경로이며 접근 때마다 작성자 또는 유효한 수신 권한을 확인한다. 여러 서버로 운영할 때는 공유 객체 저장소로 교체해야 한다.
 
 공급자가 요청 키·작업 조회를 제공하지 않으면 네트워크 장애 경계에서 생성 중복·중복 비용을 완전히 막을 수 없다. 이 경우 ‘정확히 한 번’ 생성이라고 보고하지 말고 공급자 선정 시 복구 전략을 결정한다. 음원 길이·생성 대기 시간·비용은 실제 공급자 검증 전 미확정이다.
 
@@ -690,18 +730,18 @@ record DELETE는 OWN 본인 deleted_at만 저장한다. 별도 케어 카운터�
 
 H2는 컨트롤러·매핑·간단 CRUD의 빠른 피드백에 사용할 수 있다. **최종 스키마·FK·부분 인덱스·동시성 인수 검증은 실제 PostgreSQL에서 수행한다.** Testcontainers 또는 로컬 PostgreSQL 인스턴스 중 CLI 환경에서 가능한 것을 선택한다. 서버 Docker 배포 보류는 테스트용 PostgreSQL 사용을 막는 조건이 아니다. H2 PostgreSQL 호환 모드는 기능 일부를 맞추는 옵션이며 최종 운영 동작의 증거로 간주하지 않는다. [S5]
 
-## 13. 단계별 마이그레이션 계획 — 아직 작성·적용하지 않음
+## 13. 단계별 마이그레이션 현황과 계획
 
-| 구현 단계 | 이후 작성할 마이그레이션 범위 |
+| 구현 단계 | 마이그레이션 범위 |
 |---|---|
 | 1 | V1 계정·설정·세션, 가입·인증에 필요한 제약 |
 | 2 | V2 친구·카탈로그 seed·orb·스냅샷·전송·사본·기록·멱등 저장. 향후 단계를 고려한 nullable 반응 필드·outbox 기반 |
 | 3 | V3 기록/수신 조회 최적화·인수 검증에서 필요해진 추가 인덱스. 이미 있는 열을 중복 생성하지 않음 |
 | 4 | V4 반응·신고·익명 차단·일 한도. 새 기능 이전 기존 사용자는 익명 OFF 유지 |
-| 5 | V5 케어·자료·기기·푸시 outbox 확장. 콘텐츠 준비 후 검수 seed |
-| 6 | V6 ASMR 작업·트랙·비동기 outbox 제약 추가 |
+| 5 | V5 케어·자료·기기·푸시 outbox 확장 적용. 검수된 케어 콘텐츠 seed는 아직 없음 |
+| 6 | V6 ASMR 작업·트랙·전용 비동기 outbox 제약 추가 |
 
-마이그레이션 파일 순서는 단계 시작 때 실제 구현 상태를 확인해 확정한다. 이미 적용한 파일은 수정하지 않고 새 파일로 변경한다. 테스트 DB 초기화는 명시적 테스트 환경에서만 수행한다. 이번 설계의 목표 테이블을 전부 첫 마이그레이션으로 미리 만들 필요는 없다.
+V1~V6와 PostgreSQL 전용 V2.1 파일이 작성되어 있으며, 임시 PostgreSQL에서 Flyway 적용을 검증했다. 이미 적용한 파일은 수정하지 않고 새 파일로 변경한다. 테스트 DB 초기화는 명시적 테스트 환경에서만 수행한다.
 
 ## 14. 설계 검토에서 결정할 사항
 

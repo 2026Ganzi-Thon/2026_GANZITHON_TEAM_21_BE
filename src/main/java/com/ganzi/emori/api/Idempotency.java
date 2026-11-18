@@ -17,11 +17,13 @@ public class Idempotency {
     private static final Pattern UUID_TEXT = Pattern.compile("[0-9a-fA-F]{8}(?:-[0-9a-fA-F]{4}){3}-[0-9a-fA-F]{12}");
     private final JdbcTemplate jdbc;
     private final ObjectMapper json;
+    private final IdempotencyResponseCipher cipher;
     private final ConcurrentHashMap<String, Boolean> active = new ConcurrentHashMap<>();
 
-    public Idempotency(JdbcTemplate jdbc, ObjectMapper json) {
+    public Idempotency(JdbcTemplate jdbc, ObjectMapper json, IdempotencyResponseCipher cipher) {
         this.jdbc = jdbc;
         this.json = json;
+        this.cipher = cipher;
     }
 
     public UUID key(String value) {
@@ -43,6 +45,11 @@ public class Idempotency {
 
     // Call only inside a transaction after locking the actor's app_user row.
     public String execute(UUID user, String method, String path, UUID key, String canonicalBody, Supplier<?> work) {
+        return execute(user, method, path, key, canonicalBody, 201, work);
+    }
+
+    public String execute(UUID user, String method, String path, UUID key, String canonicalBody,
+                          int httpStatus, Supplier<?> work) {
         String requestHash = DbSupport.hash(canonicalBody);
         List<Stored> found = jdbc.query("""
                 SELECT request_hash,response_json,expires_at FROM idempotency_request
@@ -56,7 +63,7 @@ public class Idempotency {
                 if (!old.requestHash().equals(requestHash)) {
                     throw new ApiException(HttpStatus.CONFLICT, "IDEMPOTENCY_CONFLICT", "같은 키의 요청 내용이 다릅니다.");
                 }
-                return old.responseJson();
+                return cipher.reveal(old.responseJson());
             }
             jdbc.update("DELETE FROM idempotency_request WHERE user_id=? AND method=? AND resource_path=? AND request_key=?",
                     user, method, path, key);
@@ -65,8 +72,9 @@ public class Idempotency {
         OffsetDateTime done = DbSupport.now();
         jdbc.update("""
                 INSERT INTO idempotency_request(id,user_id,method,resource_path,request_key,request_hash,
-                    http_status,response_json,completed_at,expires_at) VALUES (?,?,?,?,?,?,201,?,?,?)
-                """, UUID.randomUUID(), user, method, path, key, requestHash, response, done, done.plusHours(24));
+                    http_status,response_json,completed_at,expires_at) VALUES (?,?,?,?,?,?,?,?,?,?)
+                """, UUID.randomUUID(), user, method, path, key, requestHash, httpStatus,
+                cipher.protect(response), done, done.plusHours(24));
         return response;
     }
 

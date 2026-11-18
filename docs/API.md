@@ -1,7 +1,56 @@
+# EmOri API v0.5 — FE 연동 검토안
+
+## 2026-11-18 확정 계약
+
+`PUT /me/birth-date`는 Bearer 인증이 필요하다. 요청은 `{"birthDate":"YYYY-MM-DD"}`, 응답은 200 Me다. 날짜 형식 오류·존재하지 않는 날짜·미래 날짜는 422 `INVALID_INPUT`. 한국 시간 생일 기준 만 19세 이상은 `SELF_REPORTED_19_PLUS`, 미만은 `SELF_REPORTED_UNDER_19`; 미입력은 `UNKNOWN`이다. 2월 29일생은 평년 3월 1일을 생일로 계산한다. 생년월일은 재입력 가능하고 기존 `VERIFIED_19_PLUS` 상태는 유지한다. `SELF_REPORTED_19_PLUS`와 `VERIFIED_19_PLUS`만 익명 설정·발신·수신 대상이 된다. 미성년자로 등록한 사용자는 19세 생일 이후 PUT을 다시 호출해 상태를 갱신한다. 가입 API는 기존 요청을 유지하며 FE가 가입 직후 PUT을 호출한다.
+
+`GET /catalog/sounds`는 인증된 사용자에게 활성 음원 7곡의 `{items:[{id,title,color,durationMs,playbackUrl}]}`를 제공한다. `POST /orbs`는 `colors` 1~2개와 선택적 `soundId`를 받는다. 신규 요청은 AI 생성 API를 호출하지 않는다. 친구 전송은 단일 `friendId`와 대상별 취소를 사용한다. 아래의 음원 AI 생성·가입 생년월일 필수 제안은 과거 초안이며 이 절이 우선한다.
+
+
+> **v0.5 계약 및 8단계 구현 · 2026-11-18.** 아래 확정 범위는 서버에 반영했다. 친구 복수 전송·생년월일 API는 합의 전 제안이다. 아래 v0.3 원문은 과거 참고다.
+
+> **MVP 음원 정책 확정 · 2026-11-18.** 팀이 미리 준비한 무가사 음원 중 최대 1곡(15초 이하)을 구슬에 선택적으로 첨부한다. 신규 구슬은 생성 대기 없이 전송할 수 있고, AI 생성·재시도는 MVP 범위에서 제외한다. 기존 AI 음원은 이미 저장된 기록에서 계속 재생할 수 있도록 보존한다.
+
+**8단계 구현 상태:** `POST /orbs`의 `colors`·선택적 `soundId`, `GET /catalog/sounds`, 인증된 샘플 미리듣기와 구슬별 재생은 구현됐다. `emotionIds` 입력은 과거 클라이언트 호환용으로 유지한다. 친구 복수 전송과 생년월일 API는 아직 제공하지 않는다. 상세 JSON과 인증 헤더는 [FE 연동 인계](FE_INTEGRATION.md)를 참조한다.
+
+## 변경 계약안
+
+공통 `/api/v1`, Bearer, 오류·페이지·멱등키 규칙은 아래 v0.3을 따른다. ★ 요청은 사용자 동작마다 UUID를 만들고 **동일 요청의 재시도에는 같은 키**를 사용한다. 다른 payload로 재사용하면 409. 표에서 생년월일·복수 친구 전송은 미구현 제안이다.
+
+| API | 요청 | 응답 / 조건 |
+|---|---|---|
+| POST /auth/signup | `{loginId,password,nickname?,birthDate}` | 기존 `{user,session}`. nickname 생략 시 loginId; 생년월일은 YYYY-MM-DD 자기신고. 가입 필수 여부는 최신 전달 기준 제안 |
+| PUT /me/birth-date | `{birthDate:"2001-05-19"}` | `Me` 반환 제안. 기존 미입력 사용자용. 수정 가능 여부·범위 미결정 |
+| GET /catalog/sounds | — | `{items:[{id,title,color,durationMs,playbackUrl}]}`. color는 null 허용. 0 < durationMs <= 15000. 파일이 있는 활성 샘플만 반환 |
+| ★ POST /orbs | `{colors:["BLUE","PURPLE"],soundId:null}` | 201 `{orb:Orb,recordId:null}`. 색 1~2개·중복 거절. soundId 생략/null이면 음원 없음, 미등록·비활성 ID는 422 INVALID_INPUT |
+| ★ POST /orbs/{orbId}/dispatches | `{route:"FRIEND",friendId:"id"}` | 단일 친구 전송 유지. `friendIds` 복수 전송은 합의 전 미구현 |
+| GET /inbox | `cursor?,limit?` | 항목에 `orb` 포함. 익명 sender null |
+| GET /records | `cursor?,limit?,side?` | 각 항목에 `counterpart:{id,nickname}|null`. 익명·다중 대상은 null, 개인 정보 노출 금지 |
+
+`Emotion={color,area,words:[string]}`으로 색마다 4개 자동 매핑한다. 기존 개별 단어 ID 선택 계약과 호환되지 않는다. `adultStatus=VERIFIED_19_PLUS`는 실제 인증으로 오해될 수 있으므로 **기존 enum 의미를 바꾸지 않는다**. 자기신고 상태의 새 enum과 경계는 팀 합의가 필요하다. 기존 UNKNOWN은 익명 비활성이다.
+
+### MVP 음원 계약
+
+- 생성 요청 예시: `{"colors":["BLUE","PURPLE"],"soundId":"sample-id"}`. 구슬은 즉시 초안으로 반환하며 전송 시 음원 생성 상태를 기다리지 않는다.
+- 기존 `Orb.playlist`에 `{id,status:"READY",tracks:[{id,order:1,title,durationMs,playbackUrl}]}`를 반환한다. 카탈로그 ID는 `soundId`에 사용한다. 음원 없는 구슬의 `playlist`는 null이다. 과거 AI 플레이리스트는 저장된 형식으로 읽는다.
+- 신규 색상 구슬에 AI 생성 요청을 보내면 409 `ACTION_NOT_ALLOWED`를 반환한다. 카탈로그에는 파일이 있는 활성 샘플만 나오고, 기존에 첨부된 비활성 샘플은 해당 구슬 접근 권한이 있는 사용자에게 계속 재생된다. 미리듣기와 구슬 재생은 Bearer 인증이 필요하다.
+
+### 전송·취소의 미결정 충돌
+
+기존 `POST /dispatches/{dispatchId}/targets/{targetId}/cancel`과 FE `POST /dispatches/{id}/cancel`은 동등하지 않다. 대상별 취소를 보존하는 안을 우선 제안한다. 전체 취소 엔드포인트는 일부 열람·만료·이미 취소된 대상의 결과 의미가 합의되기 전 구현 계약으로 확정하지 않는다. 복수 친구 전송의 대상 유효성, 원자성, 중복 ID, 최대 수, 실패 응답도 팀 합의가 필요하다.
+
+### 나머지 호환 확인
+
+FE mock과 v0.3의 `open/replay`, `finish`, 받은 기록 삭제, 신고 본문·상태코드 및 페이지 반복 조회는 구현 대조가 필요하다. 조용히 듣기는 익명 수신에만 허용하는 기존 정책을 따른다.
+
+**저장소 반영 메모:** 위 v0.5의 확정 범위를 8단계에 구현했다. 위 표의 친구 복수 전송·생년월일은 미구현 제안이다. 아래 v0.3은 과거 계약 참고 자료다.
+
+## 이전 v0.3 원문 — 변경된 항목은 위 검토안 우선
+
 # EmOri API 명세서
 
 **계약 v0.3 · 2026-11-15 · 기본 경로 /api/v1**  
-정책 기준 · [EmOri_PRD.md](PRD.md). 실제 배포 주소·ASMR 공급자·연령 확인 공급자는 미정이다. 최신 기획과 사용자 결정을 반영한 목표 계약이며 기존 BE 구현 및 FE 가짜 서버의 동작과 차이가 있다.
+정책 기준 · [EmOri_PRD.md](PRD.md). 실제 배포 주소·ASMR 공급자·연령 확인 공급자는 미정이다. 현재 BE 구현과 대조했으며 FE `dev` 브랜치의 연동 차이는 [FE_INTEGRATION.md](FE_INTEGRATION.md)에 정리했다.
 
 ## 1. 공통 규칙
 
@@ -27,7 +76,7 @@ HTTPS JSON, camelCase, 인증은 `Authorization: Bearer <accessToken>`. 공개 A
 | UserSummary | `{id,nickname}`. 본인·친구 관계의 공개 요약 |
 | Me | `{id,loginId,nickname,friendCode,adultStatus}`. friendCode=loginId, adultStatus=UNKNOWN / VERIFIED_19_PLUS / INELIGIBLE |
 | Emotion | `{id,color,area,word}`. 선택된 단어 하나. 카탈로그 표 참조 |
-| Track | `{id,order,title,durationMs,playbackUrl}`. 완료 트랙만, order=1~3. URL 만료 시 상세를 다시 조회 |
+| Track | `{id,order,title,durationMs,playbackUrl}`. 완료 트랙만, order=1~3. 현재 playbackUrl은 인증이 필요한 안정된 서버 경로 |
 | Playlist | `{id,status,tracks:[Track]}`. 전송된 구슬에는 READY 플레이리스트만 포함 |
 | Orb | `{id,kind,emotions:[Emotion],playlist:Playlist\|null,createdAt}`. kind=SINGLE / MIXED. 감정·정렬 순서·매핑 버전은 생성 당시 스냅샷 보존 |
 | Dispatch | `{id,orbId,route,status,recipientCount,sentAt,cancelUntil,targets:[Target]}`. route=SELF / FRIEND / ANONYMOUS. status=SAVED / SENT / PARTIALLY_CANCELLED / CANCELLED |
@@ -49,7 +98,7 @@ HTTPS JSON, camelCase, 인증은 `Authorization: Bearer <accessToken>`. 공개 A
 | POST /auth/signup · 공개 | `{loginId,password,nickname?}` | 201 `{user:Me,session:Session}`. 409 LOGIN_ID_IN_USE |
 | POST /auth/login · 공개 | `{loginId,password}` | 200 `{user:Me,session:Session}`. 401 INVALID_CREDENTIALS |
 | POST /auth/refresh · 공개 | `{refreshToken}` | 200 Session. 토큰 회전·이전 토큰 무효화, 실패 401 INVALID_SESSION |
-| POST /auth/logout | `{}` | 204. 현재 access 세션에 연결된 refresh 세션 무효화. 기기 푸시 등록은 별도 DELETE 후 로그아웃 |
+| POST /auth/logout | `{}` | 204. 현재 access 세션에 연결된 refresh 세션 무효화 및 해당 세션의 기기 푸시 등록 해제. 별도 DELETE도 가능 |
 | GET /me | — | 200 Me |
 | PUT /me/profile | `{nickname}` | 200 Me |
 
@@ -102,6 +151,7 @@ HTTPS JSON, camelCase, 인증은 `Authorization: Bearer <accessToken>`. 공개 A
 | POST /orbs/{orbId}/asmr-generations ★ | `{description?:string}` | 202 Generation, Location은 /asmr-generations/{id}. 설명 최대 300자(작업 기본값). 미전송 작성자만 |
 | GET /asmr-generations/{id} | — | 200 Generation. 생성 요청 작성자만. 진행 중 Retry-After: 3 |
 | POST /asmr-generations/{id}/retry ★ | `{}` | 202 Generation. FAILED·PARTIAL_FAILED의 실패 트랙만 재시도. 성공 트랙 유지. 실행 중 409 GENERATION_IN_PROGRESS |
+| GET /asmr-tracks/{id}/audio | — | 200 audio/wav. 작성자 또는 취소되지 않은 해당 구슬 수신자만. 그 외 404. 인증 필요, `Cache-Control: private, no-store` |
 
 `Generation={id,orbId,status,trackCount:3,tracks:[GenerationTrack],createdAt,updatedAt}`. `GenerationTrack={id,order,status,title:string|null,durationMs:number|null,playbackUrl:string|null,errorCode:string|null}`. 완료 전 미정 필드는 null. 상태는 아래와 같다.
 
@@ -115,6 +165,8 @@ HTTPS JSON, camelCase, 인증은 `Authorization: Bearer <accessToken>`. 공개 A
 폴링은 약 3초 간격으로 진행하며 종료 상태에서 멈춘다. 같은 orb에는 하나의 생성 작업만 연결한다. 재생성은 새 초안, 실패 복구는 retry를 사용한다. 기존 생성이 있으면 409 GENERATION_EXISTS. 제공자 오류는 작업 errorCode=GENERATION_FAILED 또는 GENERATION_TIMEOUT으로 표현한다. 생성 요청 자체를 받지 못한 일시 장애는 503이다.
 
 전송 시 이미 생성 요청한 음악이 READY여야 한다. 실패 상태에서도 첨부를 DELETE하면 음악 없이 전송 가능하다. 첨부 해제 후 옛 생성 결과가 다시 붙지 않도록 연결 상태를 확인한다. 전송된 플레이리스트의 트랙 ID·순서를 고정하며 URL 재발급으로 콘텐츠를 바꾸지 않는다. 크레딧·충전·결제 API는 이번 목표 계약에 포함하지 않는다.
+
+**6단계 구현 상태:** 생성 요청·재시도는 DB 커밋 후 워커가 처리한다. 현재 운영 기본 설정에는 실제 생성 공급자가 연결되지 않아 POST 생성 요청은 503 `GENERATION_UNAVAILABLE`이다. `asmr-test` 프로필과 `EMORI_ASMR_TEST_GENERATOR=true`를 함께 설정한 테스트 환경에서만 30초 무음 PCM WAV를 생성한다. 제목에 `Test fixture`를 넣어 실제 AI 결과로 표시하지 않는다. 운영에서 사용할 공급자, 영구 파일 저장소와 음원 품질 검증은 별도 결정이 필요하다.
 
 ## 7. 전달·발신 대상별 상태·취소
 
