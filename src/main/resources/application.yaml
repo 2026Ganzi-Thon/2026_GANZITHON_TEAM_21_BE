@@ -12,6 +12,8 @@ spring:
       fail-on-unknown-properties: true
 
 emori:
+  cors:
+    allowed-origin: ${CORS_ALLOWED_ORIGIN:https://emori.expo.app}
   auth:
     access-seconds: ${AUTH_ACCESS_SECONDS:900}
     refresh-seconds: ${AUTH_REFRESH_SECONDS:2592000}

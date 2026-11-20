@@ -32,6 +32,7 @@ services:
       AUTH_REFRESH_SECONDS: ${AUTH_REFRESH_SECONDS:-2592000}
       PUSH_WORKER_ENABLED: ${PUSH_WORKER_ENABLED:-false}
       EXPO_ACCESS_TOKEN: ${EXPO_ACCESS_TOKEN:-}
+      CORS_ALLOWED_ORIGIN: ${CORS_ALLOWED_ORIGIN:-https://emori.expo.app}
     volumes:
       - asmr_data:/app/data/asmr
     ports:
